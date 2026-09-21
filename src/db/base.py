@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import MetaData
+from sqlalchemy import DateTime, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Alembic's own recommended naming convention — without it, autogenerate produces
@@ -26,7 +26,15 @@ class UUIDMixin:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(tz=UTC))
+    # timezone=True is not optional: CLAUDE.md §8 requires timezone-aware UTC
+    # everywhere, and the default SQLAlchemy DateTime column is naive — asyncpg
+    # rejects a tz-aware Python datetime against a naive column outright, so this
+    # isn't just a correctness nicety, it's the difference between working and a 500.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(tz=UTC)
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(tz=UTC), onupdate=lambda: datetime.now(tz=UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
     )

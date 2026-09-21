@@ -9,9 +9,9 @@ from alembic import context
 from src.config import get_settings
 from src.db.base import Base
 
-# Import every module that defines Base-mapped models here so autogenerate can see
-# them. Empty for now — the auth module is the first to add one, e.g.:
-# from src.modules.auth import models as auth_models  # noqa: F401
+# Import every module that defines Base-mapped models here so autogenerate can see them.
+from src.modules.auth import models as auth_models  # noqa: F401
+from src.modules.users import models as users_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

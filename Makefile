@@ -1,4 +1,4 @@
-.PHONY: dev up down logs migrate seed test lint types check shell
+.PHONY: dev up down logs migrate seed test lint types check shell keys
 
 VENV := .venv/bin
 
@@ -10,6 +10,11 @@ dev:
 
 migrate:
 	$(VENV)/alembic upgrade head
+
+# Dev-only JWT signing keypair, generated once into secrets/ (gitignored). Safe to
+# re-run — it never overwrites an existing keypair.
+keys:
+	$(VENV)/python -m scripts.generate_dev_keys
 
 test:
 	$(VENV)/pytest

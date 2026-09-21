@@ -19,6 +19,7 @@ from src.core.handlers import register_exception_handlers
 from src.core.logging import configure_logging
 from src.core.middleware import RequestContextMiddleware
 from src.core.router import build_api_router
+from src.core.security import build_jwks
 from src.db import mongo, postgres
 from src.db import redis as redis_db
 
@@ -89,5 +90,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
 
     app.include_router(build_api_router(api_prefix=settings.app.api_prefix))
+
+    # RFC 5785 requires this at the host root, not under /api/v1 — the one deliberate
+    # exception to "every module router mounts under the API prefix" (CLAUDE.md §4).
+    # Small enough that it doesn't need its own module.
+    @app.get("/.well-known/jwks.json", tags=["auth"])
+    async def jwks() -> dict[str, object]:
+        return build_jwks(settings.security)
 
     return app
