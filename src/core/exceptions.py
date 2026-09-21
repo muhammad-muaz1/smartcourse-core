@@ -51,3 +51,12 @@ class ForbiddenError(AppError):
 class BusinessRuleError(AppError):
     code = "BUSINESS_RULE_VIOLATION"
     message = "Business rule violation"
+
+
+class RateLimitedError(AppError):
+    """Not in CLAUDE.md's original six — added for the auth module's login/register
+    throttling (docs/adr/0008), a real, immediate caller, not a speculative one. 429 is
+    a distinct HTTP semantic none of the other six correctly represent."""
+
+    code = "RATE_LIMITED"
+    message = "Too many requests"
