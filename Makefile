@@ -1,4 +1,4 @@
-.PHONY: dev up down logs migrate seed test lint types check shell keys
+.PHONY: dev up down logs migrate seed test lint types check shell keys create-admin
 
 VENV := .venv/bin
 
@@ -16,15 +16,20 @@ migrate:
 keys:
 	$(VENV)/python -m scripts.generate_dev_keys
 
+# The only way to get an admin account — self-registration can't grant that role.
+# Prompts for the password interactively; see scripts/create_admin.py for flags.
+create-admin:
+	$(VENV)/python -m scripts.create_admin --email $(EMAIL) --full-name "$(NAME)"
+
 test:
 	$(VENV)/pytest
 
 lint:
-	$(VENV)/ruff check src/ tests/
-	$(VENV)/ruff format --check src/ tests/
+	$(VENV)/ruff check src/ tests/ scripts/
+	$(VENV)/ruff format --check src/ tests/ scripts/
 
 types:
-	$(VENV)/mypy src/
+	$(VENV)/mypy src/ scripts/
 
 check: lint types test
 

@@ -87,6 +87,19 @@ curl http://localhost:8000/api/v1/health | python3 -m json.tool
 Each dependency shows its own status — `postgres`/`mongo`/`redis` all `"ok"` means
 you're fully set up; anything else names exactly which one isn't reachable and why.
 
+### Creating an admin account
+
+Self-registration only ever grants `student` or `instructor` — `admin` is never
+something a registration payload can request for itself. The only way to get one:
+
+```bash
+make create-admin EMAIL=you@example.com NAME="Your Name"   # prompts for a password
+```
+
+(or `python -m scripts.create_admin --email ... --full-name ...` directly, which also
+accepts `--password` if you need it non-interactive — the Makefile target always
+prompts, since a password on the command line lands in shell history.)
+
 ### Try the auth flow
 
 ```bash
@@ -131,6 +144,7 @@ docs/adr/               # decisions worth knowing the "why" behind
 make dev        # API with auto-reload (host/port/reload from .env)
 make migrate    # alembic upgrade head
 make keys       # generate a dev JWT signing keypair (safe to re-run, never overwrites)
+make create-admin EMAIL=... NAME="..."   # the only way to get an admin account
 make test       # full test suite (unit + integration — integration needs Docker)
 make lint       # ruff check + format --check
 make types      # mypy --strict on src/
