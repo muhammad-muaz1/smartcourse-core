@@ -61,10 +61,10 @@ ignore = []
 known-first-party = ["src"]
 
 [tool.ruff.lint.flake8-bugbear]
-# FastAPI's documented dependency-injection pattern is Depends(...) as a parameter
-# default; ruff's B008 doesn't exempt it by default the way it does for a handful of
-# other frameworks.
-extend-immutable-calls = ["fastapi.Depends"]
+# FastAPI's documented dependency-injection pattern is Depends(...)/Query(...) as a
+# parameter default; ruff's B008 doesn't exempt these by default the way it does for a
+# handful of other frameworks.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.12"
