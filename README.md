@@ -37,9 +37,15 @@ produces or consumes an event yet.
 - **`users` module** — the `User` model and the lookup/creation functions `auth` calls;
   no user-facing endpoints yet (list/detail/update/role-change are still to build — see
   `docs/architecture/api-design.md` §4).
+- **`courses` module** — basic catalogue CRUD: `POST /courses` (instructor-only),
+  `GET /courses` (public browse with `?q=&level=&status=` and cursor pagination),
+  `GET /courses/{id}`, `PATCH /courses/{id}` and `DELETE /courses/{id}` (soft archive) —
+  both restricted to the owning instructor or an admin. Modules, lessons,
+  prerequisites, publishing and enrollment aren't built yet (see
+  `docs/architecture/api-design.md` §5-7 and `docs/adr/0009`).
 
-Everything else in the API design (courses, enrollments, progress, notifications,
-analytics) isn't built yet.
+Everything else in the API design (enrollments, progress, notifications, analytics)
+isn't built yet.
 
 ## Prerequisites
 
@@ -118,6 +124,24 @@ curl -X POST localhost:8000/api/v1/auth/login \
 curl localhost:8000/api/v1/auth/me -H "Authorization: Bearer <access_token>"
 ```
 
+### Try the courses flow
+
+```bash
+# Create a course (instructor only — the token from the login above)
+curl -X POST localhost:8000/api/v1/courses \
+  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
+  -d '{"title":"Intro to Python","description":"Learn the basics","level":"beginner"}'
+
+# Browse the catalogue (public, no token needed)
+curl "localhost:8000/api/v1/courses?q=Python&level=beginner&limit=20"
+
+# Update or archive (owning instructor or an admin only)
+curl -X PATCH localhost:8000/api/v1/courses/<course_id> \
+  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
+  -d '{"title":"Intro to Python (Updated)"}'
+curl -X DELETE localhost:8000/api/v1/courses/<course_id> -H "Authorization: Bearer <access_token>"
+```
+
 Interactive API docs: `http://localhost:8000/docs`.
 
 ## Project layout
@@ -131,7 +155,8 @@ src/
 └── modules/
     ├── health/                   # GET /health, GET /version
     ├── auth/                     # register/login/refresh/logout/me/password reset
-    └── users/                    # User model + lookups (no routes yet)
+    ├── users/                    # User model + lookups (no routes yet)
+    └── courses/                  # course catalogue CRUD (create/browse/read/update/archive)
 
 migrations/postgres/   # Alembic
 tests/                 # mirrors src/modules/, plus tests/core/ and tests/db/
@@ -177,3 +202,8 @@ still exercises everything that doesn't require a container.
 - **0008** — why `auth` is allowed to import `users`' model and service directly, and
   why the reuse-detection code path in `auth/service.py` explicitly commits before
   raising, against the usual "services don't commit" rule.
+- **0009** — the `courses` module is a deliberately basic-CRUD slice (no modules,
+  lessons, publishing or enrollment yet); why its owner-or-admin check compares a raw
+  string instead of importing `users.models.UserRole`; and a reminder that a module
+  without `__init__.py` fails auto-discovery silently — no error, it just never appears
+  in `/openapi.json`.

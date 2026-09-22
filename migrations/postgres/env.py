@@ -1,16 +1,17 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
 from src.config import get_settings
 from src.db.base import Base
 
 # Import every module that defines Base-mapped models here so autogenerate can see them.
 from src.modules.auth import models as auth_models  # noqa: F401
+from src.modules.courses import models as courses_models  # noqa: F401
 from src.modules.users import models as users_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
