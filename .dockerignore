@@ -1,0 +1,16 @@
+# Never bake local config or keys into an image — compose injects both at runtime.
+**/.env
+**/.env.*
+secrets/
+*.pem
+
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+.git/
+.claude/
+docs/

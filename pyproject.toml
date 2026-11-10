@@ -1,49 +1,43 @@
+# Workspace root. Holds no code — it ties the deployables and the shared library into
+# one lockfile and one dev venv, and carries the lint/type config every member shares.
+#
+# Every service and the gateway import their own code as `src`, so none of them is
+# installed as a package (tool.uv.package = false): each runs from its own directory,
+# where `src` resolves to that service alone. Only libs/ are real installable packages.
 [project]
 name = "smartcourse"
 version = "0.1.0"
-description = "SmartCourse Core — backend for a large-scale learning platform"
+description = "SmartCourse — backend for a large-scale learning platform"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
-dependencies = [
-  "fastapi>=0.141,<0.142",
-  "uvicorn[standard]>=0.53,<0.54",
-  "pydantic[email]>=2.13,<3",
-  "pydantic-settings>=2.15,<3",
-  "sqlalchemy[asyncio]>=2.0,<2.1",
-  "asyncpg>=0.31,<0.32",
-  "alembic>=1.20,<2",
-  "beanie>=2.2,<3",
-  "redis>=8.1,<9",
-  "structlog>=26.1,<27",
-  "argon2-cffi>=25.1,<26",
-  "pyjwt[crypto]>=2.14,<3",
-  "cryptography>=44,<51",
-]
+dependencies = []
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "ruff>=0.16,<0.17",
   "mypy>=2.3,<3",
   "pytest>=9.1,<10",
   "pytest-asyncio>=1.4,<2",
   "pytest-cov>=7.1,<8",
-  "testcontainers[postgres,mongodb,redis]>=4.15,<5",
+  "testcontainers[postgres,redis]>=4.15,<5",
   "pre-commit>=4.6,<5",
   "httpx>=0.28,<0.29",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv]
+package = false
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[tool.uv.workspace]
+members = ["libs/platform-core", "services/identity", "services/course", "gateway"]
+
+[tool.uv.sources]
+smartcourse-platform-core = { workspace = true }
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = [".", "tests"]
+extend-exclude = ["**/migrations/versions"]
 
 [tool.ruff.lint]
 select = [
@@ -58,7 +52,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["src"]
+known-first-party = ["src", "platform_core"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's documented dependency-injection pattern is Depends(...)/Query(...) as a
@@ -66,6 +60,8 @@ known-first-party = ["src"]
 # handful of other frameworks.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
+# Run from inside each member's directory (see Makefile), with this file passed via
+# --config-file, so `src` always means that member's own package.
 [tool.mypy]
 python_version = "3.12"
 strict = true
@@ -73,17 +69,8 @@ mypy_path = "."
 explicit_package_bases = true
 plugins = ["pydantic.mypy"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
-
-[tool.coverage.run]
-source = ["src"]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-  "pragma: no cover",
-  "if TYPE_CHECKING:",
-]
+# asyncpg ships neither inline types nor stubs. Only the repo-root scripts/ use it
+# directly; services reach it through SQLAlchemy, which is typed.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true

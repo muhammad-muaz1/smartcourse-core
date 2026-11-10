@@ -1,0 +1,81 @@
+# Local stack: shared infrastructure + every service + the gateway.
+#   make up             everything
+#   make up s=course    one service plus what it depends on
+# Credentials here are throwaway local-container values, never real ones.
+
+x-service-env: &service-env
+  SMARTCOURSE_APP__ENV: local
+  SMARTCOURSE_LOG__JSON_LOGS: "true"
+  # Inside the compose network only the gateway fronts the services; trust its
+  # X-Forwarded-For so per-IP throttles see the real client.
+  FORWARDED_ALLOW_IPS: "*"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  identity:
+    build: { context: .., dockerfile: services/identity/Dockerfile }
+    # Dev convenience only: migrate on start. A production deploy runs migrations as
+    # its own step, never from the app container.
+    command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8001"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/identity_db
+      SMARTCOURSE_REDIS__URL: redis://redis:6379/0
+      SMARTCOURSE_SECURITY__JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/jwt_private.pem
+      SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+    volumes:
+      # Generate with `make keys` before the first `make up`.
+      - ../secrets:/run/secrets/jwt:ro
+    ports: ["8001:8001"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  course:
+    build: { context: .., dockerfile: services/course/Dockerfile }
+    command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8002"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
+      SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+    volumes:
+      # The public key only — course verifies tokens, it never signs them.
+      - ../secrets/jwt_public.pem:/run/secrets/jwt/jwt_public.pem:ro
+    ports: ["8002:8002"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  gateway:
+    build: { context: .., dockerfile: gateway/Dockerfile }
+    environment:
+      SMARTCOURSE_APP__ENV: local
+      SMARTCOURSE_UPSTREAMS__IDENTITY_URL: http://identity:8001
+      SMARTCOURSE_UPSTREAMS__COURSE_URL: http://course:8002
+    ports: ["8000:8000"]
+    depends_on: [identity, course]
+
+volumes:
+  postgres-data:

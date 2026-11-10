@@ -9,8 +9,8 @@ repos:
   - repo: local
     hooks:
       - id: mypy
-        name: mypy --strict
-        entry: .venv/bin/mypy src/
+        name: mypy --strict (every workspace member)
+        entry: make types
         language: system
         pass_filenames: false
         types: [python]

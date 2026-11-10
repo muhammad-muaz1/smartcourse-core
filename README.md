@@ -2,208 +2,173 @@
 
 Backend for **SmartCourse**, EduCorp's large-scale learning platform: course
 management, publishing, enrollments, progress and analytics for universities,
-enterprises and training academies. This repository is the platform backend — a
-FastAPI service backed by PostgreSQL (system of record), MongoDB (open-shaped/derived
-data) and Redis (cache, locks, rate limits — nothing durable).
+enterprises and training academies.
 
-Full business context: [`.claude/REQUIREMENT.md`](.claude/REQUIREMENT.md).
-API surface and rollout plan: `docs/architecture/api-design.md`.
-Architecture rules every change in this repo follows: [`.claude/CLAUDE.md`](.claude/CLAUDE.md)
-— read that before touching code; this README is the "how to run it" companion, not a
-restatement of the architecture.
+It is a monorepo of independently deployable services, each with its own PostgreSQL
+database, behind a gateway. Clients see a single API at `http://localhost:8000/api/v1`.
 
-## Architecture, in one paragraph
+- Business context: [`.claude/Requirement.md`](.claude/Requirement.md)
+- Architecture rules every change follows: [`.claude/Claude.md`](.claude/Claude.md). Read it before touching code.
+- API surface: [`.claude/Api_design.md`](.claude/Api_design.md)
+- Why the code is split the way it is: [`docs/adr/0010`](docs/adr/0010-split-into-services.md)
 
-Modelled on NestJS: one flat file per cross-cutting concern in `src/core/` and
-`src/db/`, one folder per feature in `src/modules/`, and a routing layer
-(`src/core/router.py`) that auto-discovers every module's `routes.py` — adding a module
-means creating a folder, never editing a central list. Nothing is scaffolded before it
-has a real caller: Kafka/Celery/Temporal folders don't exist yet because nothing
-produces or consumes an event yet.
+## What's running
 
-## What's built so far
+| Deployable | Port | Database | What it does |
+| --- | --- | --- | --- |
+| `gateway` | **8000** | — | The only address clients use. Routes by path, rejects forged tokens, carries `X-Request-ID` through to the services |
+| `services/identity` | 8001 | `identity_db` | Register, login, refresh (rotating, with reuse detection), logout, `/auth/me`, password reset, JWKS |
+| `services/course` | 8002 | `course_db` | Course catalogue CRUD: create (instructor), browse/search (public), read, update and archive (owner or admin) |
 
-- **Foundation**: config, structured JSON logging with request-id propagation, the one
-  request-context middleware + CORS, the `{"data","meta"}` success envelope, the
-  `{"code","message","details","request_id"}` error shape, Postgres/Mongo/Redis
-  connection modules, Alembic migrations.
-- **`GET /health`** — overall status + per-dependency breakdown, `200`/`503`.
-  **`GET /version`** — git SHA + build time, no dependency access.
-- **`auth` module** — full lifecycle: register, login, refresh (rotating, with reuse
-  detection that revokes the whole token family), logout (revokes the family *and*
-  denylists the presented access token), `GET /auth/me`, forgot/reset password, and
-  `/.well-known/jwks.json` for offline verification. Argon2id password hashing, RS256
-  JWTs. Login and registration are throttled per-IP/per-account via Redis.
-- **`users` module** — the `User` model and the lookup/creation functions `auth` calls;
-  no user-facing endpoints yet (list/detail/update/role-change are still to build — see
-  `docs/architecture/api-design.md` §4).
-- **`courses` module** — basic catalogue CRUD: `POST /courses` (instructor-only),
-  `GET /courses` (public browse with `?q=&level=&status=` and cursor pagination),
-  `GET /courses/{id}`, `PATCH /courses/{id}` and `DELETE /courses/{id}` (soft archive) —
-  both restricted to the owning instructor or an admin. Modules, lessons,
-  prerequisites, publishing and enrollment aren't built yet (see
-  `docs/architecture/api-design.md` §5-7 and `docs/adr/0009`).
+Shared mechanics (response envelope, error shape, logging, middleware, JWT verification,
+DB sessions, health) live in `libs/platform-core`. It holds no business logic.
 
-Everything else in the API design (enrollments, progress, notifications, analytics)
-isn't built yet.
+Content, learning, notification and analytics services come later. None has been built
+yet, so none is scaffolded.
 
 ## Prerequisites
 
-- Python 3.12
-- [`uv`](https://docs.astral.sh/uv/)
-- A reachable PostgreSQL 16+ and Redis 7+ (locally installed or however you prefer —
-  this repo doesn't yet ship a `deploy/docker-compose.yml`; see "What's not built yet"
-  in `.claude/CLAUDE.md` §3). MongoDB 7+ if you want `/health` fully green, though
-  nothing currently persists anything to it.
+- Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
+- PostgreSQL 16+ and Redis 7+, installed locally, **or** Docker (for `make up`)
 
 ## Getting started
 
-```bash
-git clone <repo> && cd smartcourse-core
+### A machine that ran the old monolith
 
-uv sync --extra dev          # installs the app + dev tooling into .venv
-
-cp env.example .env          # then edit the values below to match your local setup
-```
-
-Edit `.env` for your local Postgres/Mongo/Redis:
+This is a one-off step. It turns your repo-root `.env` into one `.env` per service,
+creates `identity_db` and `course_db`, migrates them, and copies your users, refresh
+tokens and courses across. The old database is only read, never changed, and you can
+re-run the step safely.
 
 ```bash
-SMARTCOURSE_POSTGRES__DSN=postgresql+asyncpg://<user>:<password>@localhost:5432/<db>
-SMARTCOURSE_MONGO__URL=mongodb://localhost:27017
-SMARTCOURSE_MONGO__DATABASE=<db>
-SMARTCOURSE_REDIS__URL=redis://localhost:6379/0
+uv sync --all-packages
+make cutover
+make dev
 ```
 
-The Postgres database itself must already exist (`createdb <db>`) — migrations create
-tables, not the database.
+Your existing JWT keys in `secrets/` are reused, so tokens issued before the split keep
+working.
+
+### A fresh machine
 
 ```bash
-make keys      # generates a dev JWT signing keypair into secrets/ (gitignored)
-make migrate   # alembic upgrade head — creates the users/refresh_tokens tables
-make dev       # runs the API with auto-reload, on SMARTCOURSE_APP__HOST/PORT from .env
+uv sync --all-packages   # one venv for the whole workspace
+make setup               # per-service .env files, dev JWT keys, databases, migrations
+make dev                 # gateway + every service, auto-reload; Ctrl+C stops all
 ```
 
-Verify it's up:
+Each service reads only its own `.env` (`services/<name>/.env`, `gateway/.env`). Edit the
+`SMARTCOURSE_POSTGRES__DSN` in each to match your local Postgres. The keys you need are
+listed in each `env.example`.
+
+### Verify
 
 ```bash
-curl http://localhost:8000/api/v1/health | python3 -m json.tool
+curl localhost:8000/health    # gateway: is every service up?
+curl localhost:8001/health    # identity: its Postgres + Redis
+curl localhost:8002/health    # course: its Postgres
 ```
 
-Each dependency shows its own status — `postgres`/`mongo`/`redis` all `"ok"` means
-you're fully set up; anything else names exactly which one isn't reachable and why.
+`/health` and `/version` sit at each service's root, outside `/api/v1`. They are
+infrastructure endpoints and don't change when the API version does. Each service's
+interactive docs are at `/docs` on its own port (`localhost:8001/docs`,
+`localhost:8002/docs`).
+
+### Everything in Docker instead
+
+```bash
+make keys      # once: the containers mount secrets/
+make up        # Postgres, Redis, both services, gateway (migrations run on start)
+make logs s=identity
+make down
+```
+
+## Try it
+
+```bash
+# Register (student or instructor — admin is never self-assignable)
+curl -X POST localhost:8000/api/v1/auth/register -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"correcthorse123","full_name":"You","role":"instructor"}'
+
+# Log in -> {"data": {"access_token": "...", "refresh_token": "...", ...}}
+curl -X POST localhost:8000/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"correcthorse123"}'
+
+curl localhost:8000/api/v1/auth/me -H "Authorization: Bearer <access_token>"
+
+# Courses: create (instructor), browse (public), update / archive (owner or admin)
+curl -X POST localhost:8000/api/v1/courses -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Intro to Python","description":"Learn the basics","level":"beginner"}'
+curl "localhost:8000/api/v1/courses?q=Python&level=beginner&limit=20"
+curl -X PATCH localhost:8000/api/v1/courses/<course_id> -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" -d '{"title":"Intro to Python (Updated)"}'
+curl -X DELETE localhost:8000/api/v1/courses/<course_id> -H "Authorization: Bearer <access_token>"
+```
 
 ### Creating an admin account
 
-Self-registration only ever grants `student` or `instructor` — `admin` is never
-something a registration payload can request for itself. The only way to get one:
+Self-registration only ever grants `student` or `instructor`. The only way to get an admin:
 
 ```bash
 make create-admin EMAIL=you@example.com NAME="Your Name"   # prompts for a password
 ```
 
-(or `python -m scripts.create_admin --email ... --full-name ...` directly, which also
-accepts `--password` if you need it non-interactive — the Makefile target always
-prompts, since a password on the command line lands in shell history.)
-
-### Try the auth flow
-
-```bash
-# Register (student or instructor only — admin is never self-assignable)
-curl -X POST localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"correcthorse123","full_name":"You","role":"student"}'
-
-# Log in
-curl -X POST localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"correcthorse123"}'
-# -> {"data": {"access_token": "...", "refresh_token": "...", ...}}
-
-# Use the access token
-curl localhost:8000/api/v1/auth/me -H "Authorization: Bearer <access_token>"
-```
-
-### Try the courses flow
-
-```bash
-# Create a course (instructor only — the token from the login above)
-curl -X POST localhost:8000/api/v1/courses \
-  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
-  -d '{"title":"Intro to Python","description":"Learn the basics","level":"beginner"}'
-
-# Browse the catalogue (public, no token needed)
-curl "localhost:8000/api/v1/courses?q=Python&level=beginner&limit=20"
-
-# Update or archive (owning instructor or an admin only)
-curl -X PATCH localhost:8000/api/v1/courses/<course_id> \
-  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
-  -d '{"title":"Intro to Python (Updated)"}'
-curl -X DELETE localhost:8000/api/v1/courses/<course_id> -H "Authorization: Bearer <access_token>"
-```
-
-Interactive API docs: `http://localhost:8000/docs`.
-
-## Project layout
+## Layout
 
 ```
-src/
-├── main.py, app.py, config.py    # entrypoint, app assembly, all settings
-├── core/                         # cross-cutting: router, response, exceptions,
-│                                  # handlers, middleware, logging, security, dependencies
-├── db/                           # connections only: base, postgres, mongo, redis
-└── modules/
-    ├── health/                   # GET /health, GET /version
-    ├── auth/                     # register/login/refresh/logout/me/password reset
-    ├── users/                    # User model + lookups (no routes yet)
-    └── courses/                  # course catalogue CRUD (create/browse/read/update/archive)
-
-migrations/postgres/   # Alembic
-tests/                 # mirrors src/modules/, plus tests/core/ and tests/db/
-docs/adr/               # decisions worth knowing the "why" behind
+gateway/                  # routing + coarse auth at the edge; no data
+services/
+├── identity/             # CLAUDE.md, pyproject, Dockerfile, alembic.ini, migrations/, scripts/
+│   └── src/  main.py app.py config.py core/ db/ modules/{auth,users}
+└── course/
+    └── src/  main.py app.py config.py core/ db/ modules/courses
+libs/platform-core/       # platform_core: mechanics shared by every service
+deploy/                   # docker-compose.yml, Postgres init
+scripts/                  # repo-level: create_databases, cutover_from_monolith (one-off)
+docs/adr/                 # decisions worth knowing the "why" behind
 ```
+
+Every service has the same internal shape (root `CLAUDE.md` §5). Adding a module means
+creating a folder under `src/modules/`. Its `routes.py` is picked up automatically.
 
 ## Commands
 
-```bash
-make dev        # API with auto-reload (host/port/reload from .env)
-make migrate    # alembic upgrade head
-make keys       # generate a dev JWT signing keypair (safe to re-run, never overwrites)
-make create-admin EMAIL=... NAME="..."   # the only way to get an admin account
-make test       # full test suite (unit + integration — integration needs Docker)
-make lint       # ruff check + format --check
-make types      # mypy --strict on src/
-make check      # lint + types + test — run before every commit
-make shell      # python shell with the app already constructed
-```
+`s=<name>` targets one of `identity`, `course`, `gateway`. Without it, a command runs on all of them.
 
-`make up`/`down`/`logs`/`seed` are declared but not backed yet — they fail with a clear
-"no such file" until `deploy/docker-compose.yml` and a seed script exist.
+```bash
+make dev [s=course]      # run with auto-reload
+make migrate [s=course]  # alembic upgrade head
+make setup               # env + keys + db + migrate, for a fresh machine
+make cutover             # one-off move from the monolith
+make env                 # per-service .env from env.example (never overwrites)
+make keys                # dev JWT keypair into secrets/ (never overwrites)
+make db                  # create each service's database if missing
+make create-admin EMAIL=... NAME="..."
+make test [s=course]     # unit + integration (integration needs Docker)
+make lint                # ruff check + format --check
+make types               # mypy --strict, per member
+make check               # lint + types + test — before every commit
+make up [s=course] / make down / make logs [s=course]   # Docker
+```
 
 ## Testing
 
 Unit tests touch no I/O. Integration tests use
-[testcontainers](https://testcontainers.com/) against real Postgres/Mongo/Redis — never
-a mocked database (see `.claude/CLAUDE.md` §12) — so `make test` needs Docker for the
-full suite to run; without it, `pytest tests/core tests/health tests/db/test_base.py`
-still exercises everything that doesn't require a container.
+[testcontainers](https://testcontainers.com/) against real Postgres and Redis, never a
+mocked database, so `make test` needs a running Docker daemon for the full suite. Without
+Docker, the integration tests error at setup and the unit tests still run.
 
-## Decisions worth reading before changing core infrastructure
+Tests live beside the code they test: `services/<name>/tests/`, `gateway/tests/`,
+`libs/platform-core/tests/`. Each suite runs from its own directory.
 
-`docs/adr/` has the full list; the ones most likely to bite you if you don't know them:
+## Decisions worth reading before changing infrastructure
 
-- **0003** — Starlette's middleware stack is LIFO, not FIFO. Middleware is registered
-  in `app.py` in the *reverse* of its execution order.
-- **0005** / **0008** — PyMongo, asyncpg and SQLAlchemy's `Enum`/`DateTime` columns all
-  have a default that silently does the wrong thing here (30s hangs on an unreachable
-  Mongo, naive timestamp columns rejecting timezone-aware datetimes, enum columns
-  storing the Python member's name instead of its value). Fixed, but worth knowing the
-  defaults are traps if you add a similar column or client elsewhere.
-- **0008** — why `auth` is allowed to import `users`' model and service directly, and
-  why the reuse-detection code path in `auth/service.py` explicitly commits before
-  raising, against the usual "services don't commit" rule.
-- **0009** — the `courses` module is a deliberately basic-CRUD slice (no modules,
-  lessons, publishing or enrollment yet); why its owner-or-admin check compares a raw
-  string instead of importing `users.models.UserRole`; and a reminder that a module
-  without `__init__.py` fails auto-discovery silently — no error, it just never appears
-  in `/openapi.json`.
+- **0010**: the service split. Why Mongo is gone, why course has no foreign key to users,
+  why a logout takes up to 15 minutes to reach services other than identity, and why the
+  gateway doesn't reject expired tokens.
+- **0003**: Starlette middleware is LIFO. `platform_core.middleware.install_middleware`
+  encodes the order once.
+- **0008**: why `auth` may import `users` directly, and why reuse detection commits
+  before raising.
+- **0009**: a module folder without `__init__.py` silently never gets its routes mounted.

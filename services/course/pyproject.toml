@@ -1,0 +1,36 @@
+[project]
+name = "smartcourse-course"
+version = "0.1.0"
+description = "SmartCourse course service — courses, modules, lessons, catalogue, publishing"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+dependencies = [
+  "smartcourse-platform-core",
+  "fastapi>=0.141,<0.142",
+  "uvicorn[standard]>=0.53,<0.54",
+  "pydantic>=2.13,<3",
+  "pydantic-settings>=2.15,<3",
+  "sqlalchemy[asyncio]>=2.0,<2.1",
+  "asyncpg>=0.31,<0.32",
+  "alembic>=1.20,<2",
+  "structlog>=26.1,<27",
+]
+
+# Imported as `src` from this directory, never installed — see the root pyproject.toml.
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+smartcourse-platform-core = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
