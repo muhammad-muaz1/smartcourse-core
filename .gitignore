@@ -37,3 +37,4 @@ secrets/
 
 # Docker volumes mounted locally
 deploy/**/data/
+.temporal/

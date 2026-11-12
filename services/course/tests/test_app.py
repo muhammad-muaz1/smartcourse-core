@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from src.app import create_app
-from src.config import CoursePostgresSettings, Settings
+from src.config import CoursePostgresSettings, CourseRedisSettings, Settings
 
 # Port 1 is reserved and never has anything listening, so a connection there fails
 # fast regardless of what happens to be running on the developer's machine.
@@ -14,18 +14,19 @@ def _client() -> TestClient:
         postgres=CoursePostgresSettings(
             dsn=f"postgresql+asyncpg://postgres:postgres@localhost:{_UNREACHABLE_PORT}/course_db"
         ),
+        redis=CourseRedisSettings(url=f"redis://localhost:{_UNREACHABLE_PORT}/1"),
     )
     return TestClient(create_app(settings))
 
 
-def test_health_reports_this_service_and_its_own_database_only() -> None:
+def test_health_reports_this_service_and_its_own_dependencies_only() -> None:
     with _client() as client:
         response = client.get("/health")
 
     assert response.status_code == 503
     body = response.json()
     assert body["service"] == "course"
-    assert set(body["services"]) == {"postgres"}
+    assert set(body["services"]) == {"postgres", "redis"}
 
 
 def test_course_routes_are_mounted_under_the_api_prefix() -> None:

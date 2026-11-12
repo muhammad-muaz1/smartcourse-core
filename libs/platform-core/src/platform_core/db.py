@@ -13,6 +13,7 @@ must fail fast, not hang every connection attempt for a minute (docs/adr/0005).
 
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from redis.asyncio import Redis
@@ -92,6 +93,14 @@ class PostgresDatabase:
             except Exception:
                 await session.rollback()
                 raise
+
+    @asynccontextmanager
+    async def session_scope(self) -> AsyncIterator[AsyncSession]:
+        """One transaction outside an HTTP request — a Temporal activity or a relay
+        loop. Same contract as ``get_session``: commit on clean exit, roll back on
+        exception; the service functions it is passed to still never commit."""
+        async for session in self.get_session():
+            yield session
 
     async def check(self) -> None:
         async with self.engine.connect() as connection:

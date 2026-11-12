@@ -1,11 +1,12 @@
-"""Every middleware we actually use, in one file. Executed in this exact order:
+"""Every middleware we actually use. Executed in this exact order:
 RequestContextMiddleware first (so request_id exists before anything else runs), then
-CORSMiddleware (starlette's own). ``install_middleware`` is the one place that order is
-encoded, so no service can get it backwards.
+CORSMiddleware (starlette's own), then — only in a service that has ★ endpoints —
+IdempotencyMiddleware (platform_core.idempotency), innermost so its error responses
+still carry the request id and CORS headers. ``install_middleware`` is the one place
+that order is encoded, so no service can get it backwards.
 
-Rate limiting, idempotency keys, body-size limits, security headers and trusted hosts
-are real needs, added when the endpoint that needs them is built, not before — see
-CLAUDE.md §12.
+Rate limiting, body-size limits, security headers and trusted hosts are real needs,
+added when the endpoint that needs them is built, not before — see CLAUDE.md §12.
 """
 
 import time
@@ -18,6 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from platform_core.config import CorsSettings
+from platform_core.idempotency import IdempotencyMiddleware, IdempotencyOptions
 from platform_core.logging import bind_request_id, clear_request_context
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -72,10 +74,14 @@ def _new_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def install_middleware(app: FastAPI, *, cors: CorsSettings) -> None:
+def install_middleware(
+    app: FastAPI, *, cors: CorsSettings, idempotency: IdempotencyOptions | None = None
+) -> None:
     """Starlette's middleware stack is LIFO: the middleware added last wraps everything
     added before it and runs first on the way in (docs/adr/0003). So the add order here
     is the reverse of the execution order in the module docstring."""
+    if idempotency is not None:
+        app.add_middleware(IdempotencyMiddleware, options=idempotency)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors.allow_origins,

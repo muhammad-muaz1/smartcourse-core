@@ -82,3 +82,20 @@ class JWTVerifySettings(BaseModel):
 
     jwt_public_key_path: str = "../../secrets/jwt_public.pem"
     jwt_algorithm: str = "RS256"
+
+
+class TemporalSettings(BaseModel):
+    """Where a service's worker connects, and the queue it serves. One cluster, one
+    namespace per environment; each service owns exactly one task queue."""
+
+    target: str = "localhost:7233"
+    namespace: str = "default"
+    task_queue: str = "default-tq"
+
+
+class IdempotencySettings(BaseModel):
+    # How long a stored response answers a retry with the same Idempotency-Key.
+    response_ttl_seconds: int = 24 * 60 * 60
+    # How long a key stays locked while its first request is still running. Longer than
+    # any request should ever take; a crashed request frees the key after this.
+    in_flight_ttl_seconds: int = 60

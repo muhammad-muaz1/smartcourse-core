@@ -15,10 +15,13 @@ WORKDIR /app
 # workspace member's pyproject.toml to resolve the lockfile, not just this one's.
 COPY pyproject.toml uv.lock ./
 COPY libs/platform-core/pyproject.toml libs/platform-core/
+COPY libs/contracts/pyproject.toml libs/contracts/
 COPY services/identity/pyproject.toml services/identity/
 COPY services/course/pyproject.toml services/course/
+COPY services/learning/pyproject.toml services/learning/
 COPY gateway/pyproject.toml gateway/
 COPY libs/platform-core/src libs/platform-core/src
+COPY libs/contracts/src libs/contracts/src
 RUN uv sync --frozen --no-dev --package smartcourse-course
 
 COPY services/course /app/services/course

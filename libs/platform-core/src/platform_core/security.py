@@ -83,6 +83,20 @@ def authenticate(
     )
 
 
+def subject_from_authorization(
+    authorization: str | None, *, settings: JWTVerifySettings
+) -> str | None:
+    """The verified ``sub`` of a ``Bearer`` header, or None if there is no valid access
+    token. For middleware that must key state by user before any route runs."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        payload = decode_access_token(authorization[len("bearer ") :].strip(), settings=settings)
+    except InvalidTokenError:
+        return None
+    return str(payload["sub"])
+
+
 def roles_dependency(
     get_current_user: Callable[..., Awaitable[CurrentUser]], *roles: str
 ) -> Callable[..., Awaitable[CurrentUser]]:

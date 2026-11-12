@@ -86,6 +86,7 @@ def create_app(
     checks = {
         "identity": _upstream_check(client, upstreams.identity_url),
         "course": _upstream_check(client, upstreams.course_url),
+        "learning": _upstream_check(client, upstreams.learning_url),
     }
     app.include_router(build_health_router(checks=checks, health=settings.health, app=settings.app))
 

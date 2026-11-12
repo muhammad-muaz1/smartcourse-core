@@ -15,7 +15,7 @@ from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVICES_WITH_A_DATABASE = ("identity", "course")
+SERVICES_WITH_A_DATABASE = ("identity", "course", "learning")
 DSN_KEY = "SMARTCOURSE_POSTGRES__DSN"
 
 

@@ -11,16 +11,19 @@ misconfigured deployment fails before it accepts traffic.
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from platform_core.config import (
     AppSettings,
     CorsSettings,
     HealthSettings,
+    IdempotencySettings,
     JWTVerifySettings,
     LogSettings,
     PostgresSettings,
+    RedisSettings,
+    TemporalSettings,
 )
 
 
@@ -31,6 +34,20 @@ class CourseAppSettings(AppSettings):
 
 class CoursePostgresSettings(PostgresSettings):
     dsn: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/course_db"
+
+
+class CourseRedisSettings(RedisSettings):
+    # DB 1 is course's (docs/adr/0010). Today: Idempotency-Key responses for publish.
+    url: str = "redis://localhost:6379/1"
+
+
+class CourseTemporalSettings(TemporalSettings):
+    task_queue: str = "course-tq"
+
+
+class OutboxSettings(BaseModel):
+    poll_interval_seconds: float = 1.0
+    batch_size: int = 100
 
 
 class Settings(BaseSettings):
@@ -46,7 +63,12 @@ class Settings(BaseSettings):
     log: LogSettings = Field(default_factory=LogSettings)
     cors: CorsSettings = Field(default_factory=CorsSettings)
     postgres: CoursePostgresSettings = Field(default_factory=CoursePostgresSettings)
+    redis: CourseRedisSettings = Field(default_factory=CourseRedisSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
+    idempotency: IdempotencySettings = Field(default_factory=IdempotencySettings)
+    # Used by the worker process (src/worker.py) only — the API never talks to Temporal.
+    temporal: CourseTemporalSettings = Field(default_factory=CourseTemporalSettings)
+    outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     # Public key only — this service verifies tokens, it never issues them.
     security: JWTVerifySettings = Field(default_factory=JWTVerifySettings)
 

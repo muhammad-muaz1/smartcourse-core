@@ -17,6 +17,7 @@ from src.config import Settings, UpstreamSettings
 
 IDENTITY = "http://identity.test"
 COURSE = "http://course.test"
+LEARNING = "http://learning.test"
 
 
 def _b64url_uint(value: int) -> str:
@@ -66,7 +67,8 @@ def upstreams() -> FakeUpstreams:
 @pytest.fixture
 def client(upstreams: FakeUpstreams) -> Iterator[TestClient]:
     settings = Settings(
-        _env_file=None, upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE)
+        _env_file=None,
+        upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE, learning_url=LEARNING),
     )
     app = create_app(settings, transport=httpx.MockTransport(upstreams))
     with TestClient(app) as test_client:
@@ -88,6 +90,25 @@ def test_course_routes_go_to_course_with_the_query_string(
 
     assert response.json()["host"] == "course.test"
     assert upstreams.requests[0].url.query == b"q=python&limit=5"
+
+
+@pytest.mark.parametrize(
+    ("path", "host"),
+    [
+        ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/enrollments", "learning.test"),
+        ("/api/v1/users/3f6c1c1e-0000-4000-8000-000000000000/enrollment-history", "learning.test"),
+        ("/api/v1/enrollments/me", "learning.test"),
+        ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/modules", "course.test"),
+        ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/publish", "course.test"),
+        ("/api/v1/modules/3f6c1c1e-0000-4000-8000-000000000000/lessons", "course.test"),
+        ("/api/v1/lessons/3f6c1c1e-0000-4000-8000-000000000000", "course.test"),
+        ("/api/v1/users/3f6c1c1e-0000-4000-8000-000000000000", "identity.test"),
+    ],
+)
+def test_nested_resources_go_to_the_service_that_owns_them(
+    client: TestClient, path: str, host: str
+) -> None:
+    assert client.get(path).json()["host"] == host
 
 
 def test_jwks_is_served_from_identity_at_the_host_root(client: TestClient) -> None:
@@ -190,7 +211,7 @@ def test_health_is_ok_only_when_every_service_is(
 ) -> None:
     healthy = client.get("/health")
     assert healthy.status_code == 200
-    assert set(healthy.json()["services"]) == {"identity", "course"}
+    assert set(healthy.json()["services"]) == {"identity", "course", "learning"}
 
 
 def test_health_is_503_when_a_service_is_down(upstreams: FakeUpstreams) -> None:
@@ -198,7 +219,8 @@ def test_health_is_503_when_a_service_is_down(upstreams: FakeUpstreams) -> None:
         503 if request.url.host == "course.test" else 200
     )
     settings = Settings(
-        _env_file=None, upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE)
+        _env_file=None,
+        upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE, learning_url=LEARNING),
     )
     with TestClient(create_app(settings, transport=httpx.MockTransport(upstreams))) as client:
         response = client.get("/health")

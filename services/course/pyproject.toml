@@ -6,6 +6,11 @@ requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
 dependencies = [
   "smartcourse-platform-core",
+  "smartcourse-contracts",
+  # Publishing saga + delivery of course.* events (worker process only).
+  "temporalio[pydantic]>=1.36,<2",
+  # Idempotency-Key responses for POST /courses/{id}/publish.
+  "redis>=8.1,<9",
   "fastapi>=0.141,<0.142",
   "uvicorn[standard]>=0.53,<0.54",
   "pydantic>=2.13,<3",
@@ -22,10 +27,12 @@ package = false
 
 [tool.uv.sources]
 smartcourse-platform-core = { workspace = true }
+smartcourse-contracts = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["temporal: needs Temporal's test server (downloaded by temporalio on first run)"]
 addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]

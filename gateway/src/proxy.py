@@ -1,8 +1,14 @@
-"""Path-prefix routing to the owning service, and the request forwarding itself.
+"""Path routing to the owning service, and the request forwarding itself.
 
 Clients see one API at /api/v1; which service answers is invisible to them. The route
 table is the gateway's entire job, so it is the one central list in the platform.
+
+Most routes are a whole-segment path prefix. A few resources are nested under another
+service's prefix — enrollments live in learning but are addressed as
+``/courses/{id}/enrollments`` — so those are matched first, by exact pattern.
 """
+
+import re
 
 import httpx
 from fastapi import Request, Response
@@ -34,20 +40,40 @@ _HOP_BY_HOP = frozenset(
 _DROP_FROM_RESPONSE = _HOP_BY_HOP | {"content-encoding"}
 
 
-def route_table(*, api_prefix: str, upstreams: UpstreamSettings) -> list[tuple[str, str]]:
-    """(path prefix, base URL) pairs. Match is on a whole path segment, so
-    /api/v1/courses never captures /api/v1/courses-archive."""
+Route = tuple[re.Pattern[str], str]
+
+_SEGMENT = r"[^/]+"
+
+
+def _prefix(prefix: str) -> re.Pattern[str]:
+    """Whole-segment prefix match: /api/v1/courses never captures
+    /api/v1/courses-archive."""
+    return re.compile(rf"{re.escape(prefix)}(?:/.*)?")
+
+
+def route_table(*, api_prefix: str, upstreams: UpstreamSettings) -> list[Route]:
+    """(pattern, base URL) pairs, first match wins — nested exceptions before the
+    prefix that would otherwise swallow them."""
+    p = re.escape(api_prefix)
     return [
-        (f"{api_prefix}/auth", upstreams.identity_url),
-        (f"{api_prefix}/users", upstreams.identity_url),
-        ("/.well-known/jwks.json", upstreams.identity_url),
-        (f"{api_prefix}/courses", upstreams.course_url),
+        # learning resources nested under course's and identity's prefixes
+        (re.compile(rf"{p}/courses/{_SEGMENT}/enrollments(?:/.*)?"), upstreams.learning_url),
+        (re.compile(rf"{p}/users/{_SEGMENT}/enrollment-history"), upstreams.learning_url),
+        (_prefix(f"{api_prefix}/enrollments"), upstreams.learning_url),
+        # identity
+        (_prefix(f"{api_prefix}/auth"), upstreams.identity_url),
+        (_prefix(f"{api_prefix}/users"), upstreams.identity_url),
+        (_prefix("/.well-known/jwks.json"), upstreams.identity_url),
+        # course
+        (_prefix(f"{api_prefix}/courses"), upstreams.course_url),
+        (_prefix(f"{api_prefix}/modules"), upstreams.course_url),
+        (_prefix(f"{api_prefix}/lessons"), upstreams.course_url),
     ]
 
 
-def resolve_upstream(path: str, routes: list[tuple[str, str]]) -> str | None:
-    for prefix, base_url in routes:
-        if path == prefix or path.startswith(prefix + "/"):
+def resolve_upstream(path: str, routes: list[Route]) -> str | None:
+    for pattern, base_url in routes:
+        if pattern.fullmatch(path):
             return base_url
     return None
 

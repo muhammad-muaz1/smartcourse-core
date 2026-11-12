@@ -7,14 +7,31 @@ from fastapi import FastAPI
 
 from platform_core.handlers import register_exception_handlers
 from platform_core.health import Check, build_health_router, log_unavailable_dependencies
+from platform_core.idempotency import IdempotencyOptions, IdempotentRoute
 from platform_core.logging import configure_logging
 from platform_core.middleware import install_middleware
+from platform_core.security import subject_from_authorization
 from src.config import Settings, get_settings
 from src.core.router import build_api_router
-from src.db import postgres
+from src.db import postgres, redis
 
-# No Redis yet: nothing in this service uses it. It arrives with the catalogue cache.
-_CHECKS: dict[str, Check] = {"postgres": postgres.check}
+_CHECKS: dict[str, Check] = {"postgres": postgres.check, "redis": redis.check}
+
+_UUID = r"[0-9a-fA-F-]{36}"
+
+
+def _idempotency(settings: Settings) -> IdempotencyOptions:
+    """The ★ endpoints this service owns (API design §13)."""
+    prefix = settings.app.api_prefix
+    return IdempotencyOptions(
+        routes=[IdempotentRoute("POST", rf"{prefix}/courses/{_UUID}/publish")],
+        redis=redis.get_redis,
+        subject_resolver=lambda header: subject_from_authorization(
+            header, settings=settings.security
+        ),
+        settings=settings.idempotency,
+        namespace=settings.app.service_name,
+    )
 
 
 def _build_lifespan(
@@ -23,10 +40,12 @@ def _build_lifespan(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         postgres.init_postgres(settings.postgres)
+        redis.init_redis(settings.redis)
         await log_unavailable_dependencies(_CHECKS)
         try:
             yield
         finally:
+            await redis.close_redis()
             await postgres.close_postgres()
 
     return lifespan
@@ -48,7 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(app)
-    install_middleware(app, cors=settings.cors)
+    install_middleware(app, cors=settings.cors, idempotency=_idempotency(settings))
 
     app.include_router(
         build_health_router(checks=_CHECKS, health=settings.health, app=settings.app)

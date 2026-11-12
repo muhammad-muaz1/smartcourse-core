@@ -1,5 +1,3 @@
-"""HTTP layer: validate, call service, return. No business logic here — see service.py."""
-
 import uuid
 
 from fastapi import APIRouter, Depends, Query, status
@@ -9,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.response import CursorPage, Envelope, success
 from src.core.dependencies import CurrentUser, get_current_user, require_roles
 from src.db.postgres import get_session
-from src.modules.courses import service
 from src.modules.courses.models import CourseLevel, CourseStatus
-from src.modules.courses.schemas import CourseCreate, CoursePublic, CourseUpdate
+from src.modules.courses.schemas import CourseCreate, CourseDetail, CoursePublic, CourseUpdate
+from src.modules.courses.service import courses as service
+from src.modules.courses.service import structure
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -32,6 +31,7 @@ async def create_course_route(
         description=body.description,
         level=body.level,
         instructor_id=current_user.id,
+        max_enrollments=body.max_enrollments,
     )
     return success(CoursePublic.model_validate(course, from_attributes=True))
 
@@ -51,12 +51,11 @@ async def list_courses_route(
     return success(page)
 
 
-@router.get("/{course_id}", response_model=Envelope[CoursePublic])
+@router.get("/{course_id}", response_model=Envelope[CourseDetail])
 async def get_course_route(
     course_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-) -> Envelope[CoursePublic]:
-    course = await service.get_course_or_404(session, course_id)
-    return success(CoursePublic.model_validate(course, from_attributes=True))
+) -> Envelope[CourseDetail]:
+    return success(await structure.get_course_detail(session, course_id))
 
 
 @router.patch("/{course_id}", response_model=Envelope[CoursePublic])
@@ -74,6 +73,10 @@ async def update_course_route(
         title=body.title,
         description=body.description,
         level=body.level,
+        # Omitted → unchanged; explicit null → unlimited.
+        max_enrollments=(
+            body.max_enrollments if "max_enrollments" in body.model_fields_set else ...
+        ),
     )
     return success(CoursePublic.model_validate(course, from_attributes=True))
 
@@ -88,3 +91,15 @@ async def archive_course_route(
         session, course_id, current_user_id=current_user.id, role=current_user.role
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{course_id}/unpublish", response_model=Envelope[CoursePublic])
+async def unpublish_course_route(
+    course_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Envelope[CoursePublic]:
+    course = await service.unpublish_course(
+        session, course_id, current_user_id=current_user.id, role=current_user.role
+    )
+    return success(CoursePublic.model_validate(course, from_attributes=True))

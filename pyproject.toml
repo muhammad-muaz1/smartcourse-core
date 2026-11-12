@@ -29,10 +29,18 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["libs/platform-core", "services/identity", "services/course", "gateway"]
+members = [
+  "libs/platform-core",
+  "libs/contracts",
+  "services/identity",
+  "services/course",
+  "services/learning",
+  "gateway",
+]
 
 [tool.uv.sources]
 smartcourse-platform-core = { workspace = true }
+smartcourse-contracts = { workspace = true }
 
 [tool.ruff]
 target-version = "py312"
@@ -52,7 +60,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "platform_core"]
+known-first-party = ["src", "platform_core", "smartcourse_contracts"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's documented dependency-injection pattern is Depends(...)/Query(...) as a

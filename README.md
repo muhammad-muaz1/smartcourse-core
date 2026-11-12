@@ -18,18 +18,25 @@ database, behind a gateway. Clients see a single API at `http://localhost:8000/a
 | --- | --- | --- | --- |
 | `gateway` | **8000** | — | The only address clients use. Routes by path, rejects forged tokens, carries `X-Request-ID` through to the services |
 | `services/identity` | 8001 | `identity_db` | Register, login, refresh (rotating, with reuse detection), logout, `/auth/me`, password reset, JWKS |
-| `services/course` | 8002 | `course_db` | Course catalogue CRUD: create (instructor), browse/search (public), read, update and archive (owner or admin) |
+| `services/course` | 8002 | `course_db` | Catalogue, modules and lessons, course lifecycle (draft → publishing → published/failed, unpublish, archive), publish runs |
+| `services/course` worker | — | `course_db` | Temporal worker on `course-tq` (publishing saga) + outbox relay |
+| `services/learning` | 8003 | `learning_db` | Enrol (duplicates, seat limits, published-only), withdraw, my enrollments, roster, history |
+| `services/learning` worker | — | `learning_db` | Temporal worker on `learning-tq`: keeps `course_cache` in step with course |
+| Temporal dev server | 7233 / UI 8233 | — | Durable workflows: publishing, course → learning event delivery |
 
-Shared mechanics (response envelope, error shape, logging, middleware, JWT verification,
-DB sessions, health) live in `libs/platform-core`. It holds no business logic.
+Shared mechanics (response envelope, error shape, logging, middleware, idempotency keys,
+JWT verification, DB sessions, health) live in `libs/platform-core`. It holds no business
+logic. `libs/contracts` holds the versioned payloads two services exchange — nothing else.
 
-Content, learning, notification and analytics services come later. None has been built
-yet, so none is scaffolded.
+Content, notification and analytics services come later. Why course → learning travels
+through Temporal rather than Kafka for now: [ADR 0011](docs/adr/0011-week2-enrollment-and-publishing.md).
 
 ## Prerequisites
 
 - Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
 - PostgreSQL 16+ and Redis 7+, installed locally, **or** Docker (for `make up`)
+- The [Temporal CLI](https://docs.temporal.io/cli#install) for `make temporal` (local dev
+  server), unless you use `make up`
 
 ## Getting started
 
@@ -54,8 +61,12 @@ working.
 ```bash
 uv sync --all-packages   # one venv for the whole workspace
 make setup               # per-service .env files, dev JWT keys, databases, migrations
-make dev                 # gateway + every service, auto-reload; Ctrl+C stops all
+make temporal            # in its own terminal: Temporal dev server, UI on :8233
+make dev                 # gateway + every service + both workers; Ctrl+C stops all
 ```
+
+Without Temporal and the workers the APIs still run, but publish runs stay `pending` and
+learning never hears about courses (so nothing is enrollable).
 
 Each service reads only its own `.env` (`services/<name>/.env`, `gateway/.env`). Edit the
 `SMARTCOURSE_POSTGRES__DSN` in each to match your local Postgres. The keys you need are
@@ -66,7 +77,8 @@ listed in each `env.example`.
 ```bash
 curl localhost:8000/health    # gateway: is every service up?
 curl localhost:8001/health    # identity: its Postgres + Redis
-curl localhost:8002/health    # course: its Postgres
+curl localhost:8002/health    # course: its Postgres + Redis
+curl localhost:8003/health    # learning: its Postgres + Redis
 ```
 
 `/health` and `/version` sit at each service's root, outside `/api/v1`. They are
@@ -78,7 +90,7 @@ interactive docs are at `/docs` on its own port (`localhost:8001/docs`,
 
 ```bash
 make keys      # once: the containers mount secrets/
-make up        # Postgres, Redis, both services, gateway (migrations run on start)
+make up        # Postgres, Redis, Temporal, every service + workers, gateway (migrations run on start)
 make logs s=identity
 make down
 ```
@@ -121,9 +133,12 @@ gateway/                  # routing + coarse auth at the edge; no data
 services/
 ├── identity/             # CLAUDE.md, pyproject, Dockerfile, alembic.ini, migrations/, scripts/
 │   └── src/  main.py app.py config.py core/ db/ modules/{auth,users}
-└── course/
-    └── src/  main.py app.py config.py core/ db/ modules/courses
+├── course/
+│   └── src/  main.py worker.py relay.py app.py config.py core/ db/ modules/courses
+└── learning/
+    └── src/  main.py worker.py app.py config.py core/ db/ modules/enrollments
 libs/platform-core/       # platform_core: mechanics shared by every service
+libs/contracts/           # smartcourse_contracts: versioned cross-service payloads
 deploy/                   # docker-compose.yml, Postgres init
 scripts/                  # repo-level: create_databases, cutover_from_monolith (one-off)
 docs/adr/                 # decisions worth knowing the "why" behind
@@ -134,10 +149,12 @@ creating a folder under `src/modules/`. Its `routes.py` is picked up automatical
 
 ## Commands
 
-`s=<name>` targets one of `identity`, `course`, `gateway`. Without it, a command runs on all of them.
+`s=<name>` targets one of `identity`, `course`, `learning`, `gateway`. Without it, a command runs on all of them.
 
 ```bash
 make dev [s=course]      # run with auto-reload
+make worker s=course     # one worker process (course | learning); no reload
+make temporal            # Temporal dev server (state in .temporal/)
 make migrate [s=course]  # alembic upgrade head
 make setup               # env + keys + db + migrate, for a fresh machine
 make cutover             # one-off move from the monolith

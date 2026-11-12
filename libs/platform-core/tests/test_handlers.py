@@ -10,6 +10,10 @@ class _Body(BaseModel):
     name: str
 
 
+class _AlreadyEnrolledError(ConflictError):
+    code = "ALREADY_ENROLLED"
+
+
 def _build_test_app() -> FastAPI:
     app = FastAPI()
     register_exception_handlers(app)
@@ -21,6 +25,10 @@ def _build_test_app() -> FastAPI:
     @app.get("/conflict")
     def conflict() -> None:
         raise ConflictError("already enrolled")
+
+    @app.get("/specific-conflict")
+    def specific_conflict() -> None:
+        raise _AlreadyEnrolledError("already enrolled")
 
     @app.get("/business-rule")
     def business_rule() -> None:
@@ -73,3 +81,9 @@ def test_request_validation_error_reports_field_details() -> None:
     assert body["code"] == "VALIDATION_ERROR"
     assert body["details"]
     assert body["details"][0]["field"]
+
+
+def test_a_subclass_keeps_its_own_code_and_its_parents_status() -> None:
+    response = client.get("/specific-conflict")
+    assert response.status_code == 409
+    assert response.json()["code"] == "ALREADY_ENROLLED"

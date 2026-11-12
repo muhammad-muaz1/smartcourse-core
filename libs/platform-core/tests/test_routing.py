@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from platform_core.routing import build_api_router, discover_routers
+from platform_core.routing import build_api_router, discover_attribute, discover_routers
 
 
 @pytest.fixture
@@ -60,3 +60,23 @@ def test_build_api_router_mounts_modules_under_the_api_prefix(
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_discover_attribute_collects_one_value_per_module_that_defines_it(
+    modules_package: ModuleType, tmp_path: Path
+) -> None:
+    root = tmp_path / "fake_service_modules"
+    (root / "widgets" / "activities.py").write_text("ACTIVITIES = ['a', 'b']\n")
+    (root / "no_routes" / "activities.py").write_text("UNRELATED = 1\n")
+
+    assert discover_attribute(modules_package, "activities", "ACTIVITIES") == [["a", "b"]]
+
+
+def test_discover_attribute_surfaces_a_broken_import_inside_the_file(
+    modules_package: ModuleType, tmp_path: Path
+) -> None:
+    root = tmp_path / "fake_service_modules"
+    (root / "widgets" / "workflows.py").write_text("import module_that_does_not_exist\n")
+
+    with pytest.raises(ModuleNotFoundError):
+        discover_attribute(modules_package, "workflows", "WORKFLOWS")

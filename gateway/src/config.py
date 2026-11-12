@@ -21,6 +21,7 @@ class GatewayAppSettings(AppSettings):
 class UpstreamSettings(BaseModel):
     identity_url: str = "http://localhost:8001"
     course_url: str = "http://localhost:8002"
+    learning_url: str = "http://localhost:8003"
     timeout_seconds: float = 10.0
     # How long identity's public keys are trusted before being re-fetched. A token
     # with an unknown kid forces an early re-fetch, so a key rotation isn't blocked by

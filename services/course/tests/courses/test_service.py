@@ -1,31 +1,13 @@
 """Requires Docker (testcontainers spins up a real Postgres)."""
 
 import uuid
-from collections.abc import AsyncIterator
 
 import pytest
-from testcontainers.community.postgres import PostgresContainer
 
-from platform_core.config import PostgresSettings
 from platform_core.exceptions import ForbiddenError, NotFoundError
 from src.db import postgres
-from src.db.base import Base
-from src.modules.courses import service
 from src.modules.courses.models import CourseLevel, CourseStatus
-
-
-@pytest.fixture
-async def _db(postgres_container: PostgresContainer) -> AsyncIterator[None]:
-    postgres.init_postgres(PostgresSettings(dsn=postgres_container.get_connection_url()))
-    engine = postgres.database.engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    try:
-        yield
-    finally:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-        await postgres.close_postgres()
+from src.modules.courses.service import courses as service
 
 
 class TestCreateCourse:

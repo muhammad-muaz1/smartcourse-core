@@ -35,6 +35,20 @@ services:
       timeout: 3s
       retries: 30
 
+  # Temporal dev server: single binary, SQLite-backed, Web UI on :8233. Fine for local
+  # work; a shared environment runs a real Temporal cluster.
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    ports: ["7233:7233", "8233:8233"]
+    volumes:
+      - temporal-data:/data
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
   identity:
     build: { context: .., dockerfile: services/identity/Dockerfile }
     # Dev convenience only: migrate on start. A production deploy runs migrations as
@@ -60,6 +74,7 @@ services:
     environment:
       <<: *service-env
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
+      SMARTCOURSE_REDIS__URL: redis://redis:6379/1
       SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
     volumes:
       # The public key only — course verifies tokens, it never signs them.
@@ -67,6 +82,47 @@ services:
     ports: ["8002:8002"]
     depends_on:
       postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Temporal worker on course-tq (publish saga, event delivery) + the outbox relay.
+  # Same image as the API; the API never talks to Temporal.
+  course-worker:
+    build: { context: .., dockerfile: services/course/Dockerfile }
+    command: ["python", "-m", "src.worker"]
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
+      SMARTCOURSE_TEMPORAL__TARGET: temporal:7233
+    depends_on:
+      course: { condition: service_started }  # its container runs the migrations
+      temporal: { condition: service_healthy }
+
+  learning:
+    build: { context: .., dockerfile: services/learning/Dockerfile }
+    command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8003"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/learning_db
+      SMARTCOURSE_REDIS__URL: redis://redis:6379/3
+      SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+    volumes:
+      - ../secrets/jwt_public.pem:/run/secrets/jwt/jwt_public.pem:ro
+    ports: ["8003:8003"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Temporal worker on learning-tq: applies course.* events to course_cache.
+  learning-worker:
+    build: { context: .., dockerfile: services/learning/Dockerfile }
+    command: ["python", "-m", "src.worker"]
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/learning_db
+      SMARTCOURSE_TEMPORAL__TARGET: temporal:7233
+    depends_on:
+      learning: { condition: service_started }
+      temporal: { condition: service_healthy }
 
   gateway:
     build: { context: .., dockerfile: gateway/Dockerfile }
@@ -74,8 +130,10 @@ services:
       SMARTCOURSE_APP__ENV: local
       SMARTCOURSE_UPSTREAMS__IDENTITY_URL: http://identity:8001
       SMARTCOURSE_UPSTREAMS__COURSE_URL: http://course:8002
+      SMARTCOURSE_UPSTREAMS__LEARNING_URL: http://learning:8003
     ports: ["8000:8000"]
-    depends_on: [identity, course]
+    depends_on: [identity, course, learning]
 
 volumes:
   postgres-data:
+  temporal-data:
