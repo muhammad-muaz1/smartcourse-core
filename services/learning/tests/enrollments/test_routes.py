@@ -12,9 +12,8 @@ from testcontainers.community.redis import RedisContainer
 from platform_core.config import JWTVerifySettings
 from src.app import create_app
 from src.config import LearningPostgresSettings, LearningRedisSettings, Settings
-from src.modules.enrollments.activities import apply_course_event
 from tests.conftest import TokenFactory
-from tests.enrollments.helpers import course_event
+from tests.enrollments.helpers import apply_course_event, course_event
 
 
 @pytest.fixture

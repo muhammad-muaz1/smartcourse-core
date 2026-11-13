@@ -19,6 +19,8 @@ COPY libs/contracts/pyproject.toml libs/contracts/
 COPY services/identity/pyproject.toml services/identity/
 COPY services/course/pyproject.toml services/course/
 COPY services/learning/pyproject.toml services/learning/
+COPY services/notification/pyproject.toml services/notification/
+COPY services/analytics/pyproject.toml services/analytics/
 COPY gateway/pyproject.toml gateway/
 COPY libs/platform-core/src libs/platform-core/src
 COPY libs/contracts/src libs/contracts/src

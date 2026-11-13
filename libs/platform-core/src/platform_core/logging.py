@@ -10,6 +10,8 @@ from typing import Any
 
 import structlog
 
+from platform_core.telemetry import current_trace_ids
+
 _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 REQUEST_ID_KEY = "request_id"
@@ -37,6 +39,16 @@ def _service_name_adder(service_name: str) -> Any:
     return add_service_name
 
 
+def _add_trace_ids(_logger: Any, _method: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    """trace_id/span_id on every line logged inside a span, so a log line found in one
+    tool opens the right trace in Jaeger — never passed manually (CLAUDE.md §11)."""
+    ids = current_trace_ids()
+    if ids is not None:
+        event_dict.setdefault("trace_id", ids[0])
+        event_dict.setdefault("span_id", ids[1])
+    return event_dict
+
+
 def configure_logging(*, service_name: str, level: str = "INFO", json_logs: bool = True) -> None:
     numeric_level = logging.getLevelNamesMapping().get(level.upper(), logging.INFO)
 
@@ -45,6 +57,7 @@ def configure_logging(*, service_name: str, level: str = "INFO", json_logs: bool
         # With several services writing to one log stream, a line that doesn't say
         # which service wrote it is unattributable.
         _service_name_adder(service_name),
+        _add_trace_ids,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso", utc=True),

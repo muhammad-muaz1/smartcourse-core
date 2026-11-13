@@ -1,19 +1,21 @@
-"""Enrollment business logic, and keeping ``course_cache`` in step with course.
+"""Enrol, withdraw, and the enrollment reads.
 
 Enrollment is ONE transaction with no network call (learning CLAUDE.md):
 
     SELECT course_cache … FOR UPDATE   status check; serialises enrolments per course
     INSERT enrollment                  duplicate → unique-index violation → 409
+                                       progress initialised (lessons_completed = 0)
     seat check, active_enrollments += 1 under the same lock (full → whole tx rolls back)
+    INSERT outbox enrollment.created.v1
 
 Every function takes the session first and never commits (CLAUDE.md §6).
 """
 
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import Select, and_, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,19 +26,18 @@ from platform_core.exceptions import (
     NotFoundError,
 )
 from platform_core.response import CursorPage, decode_cursor, encode_cursor
-from smartcourse_contracts.course_events import CourseEventV1
-from src.db.inbox import claim_event
+from src.modules.enrollments.events import record_enrollment_event
 from src.modules.enrollments.models import (
     ENROLLABLE_COURSE_STATUS,
     CourseCache,
     Enrollment,
     EnrollmentStatus,
+    StudentDirectory,
 )
 from src.modules.enrollments.schemas import EnrollmentPublic
 
-_ADMIN_ROLE = "admin"  # JWT claim value; identity's enum is never imported (CLAUDE.md §4)
-_ACTIVE_ENROLLMENT_INDEX = "uq_enrollments_active_student_course"
-COURSE_CACHE_CONSUMER = "learning.course_cache"
+ADMIN_ROLE = "admin"  # JWT claim value; identity's enum is never imported (CLAUDE.md §4)
+_CURRENT_ENROLLMENT_INDEX = "uq_enrollments_current_student_course"
 
 
 class CourseNotFoundError(NotFoundError):
@@ -63,8 +64,17 @@ class EnrollmentNotFoundError(NotFoundError):
     message = "Enrollment not found"
 
 
-def _now() -> datetime:
+class EnrollmentCompletedError(ConflictError):
+    code = "ENROLLMENT_COMPLETED"
+    message = "A completed enrollment can't be withdrawn"
+
+
+def now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def progress_percent(completed: int, total: int) -> float:
+    return round(100 * completed / total, 1) if total else 0.0
 
 
 # --- enrol / withdraw --------------------------------------------------------------
@@ -92,76 +102,103 @@ async def enroll(
     # raising rolls this insert back with the rest of the transaction.
     enrollment = Enrollment(
         student_id=student_id,
+        student_name=await session.scalar(
+            select(StudentDirectory.full_name).where(StudentDirectory.user_id == student_id)
+        ),
         course_id=course_id,
         status=EnrollmentStatus.ACTIVE,
-        enrolled_at=_now(),
+        enrolled_at=now(),
+        # Progress tracking starts here, in the same transaction (brief §3).
+        lessons_completed=0,
     )
     session.add(enrollment)
     try:
         await session.flush()
     except IntegrityError as exc:
-        if _ACTIVE_ENROLLMENT_INDEX in str(exc.orig):
+        if _CURRENT_ENROLLMENT_INDEX in str(exc.orig):
             raise AlreadyEnrolledError() from exc
         raise
     if course.max_enrollments is not None and course.active_enrollments >= course.max_enrollments:
         raise CourseFullError()
     course.active_enrollments += 1
-    await session.flush()
+    await record_enrollment_event(session, enrollment, course, "enrollment.created.v1")
     return enrollment
 
 
 async def withdraw(
     session: AsyncSession, enrollment_id: uuid.UUID, *, current_user_id: uuid.UUID, role: str
 ) -> Enrollment:
-    """Idempotent: withdrawing an already-withdrawn enrollment is a no-op."""
+    """Idempotent: withdrawing an already-withdrawn enrollment is a no-op (and emits
+    nothing). A completed enrollment is history the student earned; it isn't withdrawn."""
     enrollment = (
         await session.execute(
             select(Enrollment).where(Enrollment.id == enrollment_id).with_for_update()
         )
     ).scalar_one_or_none()
-    if enrollment is None or (role != _ADMIN_ROLE and enrollment.student_id != current_user_id):
+    if enrollment is None or (role != ADMIN_ROLE and enrollment.student_id != current_user_id):
         raise EnrollmentNotFoundError()
     if enrollment.status == EnrollmentStatus.WITHDRAWN:
         return enrollment
+    if enrollment.status == EnrollmentStatus.COMPLETED:
+        raise EnrollmentCompletedError()
 
     enrollment.status = EnrollmentStatus.WITHDRAWN
-    enrollment.withdrawn_at = _now()
-    # Atomic decrement — no need to lock the course row to give a seat back.
-    await session.execute(
-        update(CourseCache)
-        .where(CourseCache.course_id == enrollment.course_id)
-        .values(active_enrollments=CourseCache.active_enrollments - 1)
-    )
-    await session.flush()
+    enrollment.withdrawn_at = now()
+    # Atomic decrement, returning the row for the event snapshot — no lock needed to
+    # give a seat back.
+    course = (
+        await session.execute(
+            update(CourseCache)
+            .where(CourseCache.course_id == enrollment.course_id)
+            .values(active_enrollments=CourseCache.active_enrollments - 1)
+            .returning(CourseCache)
+        )
+    ).scalar_one()
+    await record_enrollment_event(session, enrollment, course, "enrollment.withdrawn.v1")
     return enrollment
 
 
 # --- reads -------------------------------------------------------------------------
 
+_Row = tuple[Enrollment, str, list[str], str | None]
 
-def _public(enrollment: Enrollment, course_title: str) -> EnrollmentPublic:
+
+def _public(row: _Row) -> EnrollmentPublic:
+    enrollment, course_title, lesson_ids, directory_name = row
+    total = len(lesson_ids)
     return EnrollmentPublic(
         id=enrollment.id,
         course_id=enrollment.course_id,
         course_title=course_title,
         student_id=enrollment.student_id,
+        # The enrollment-time snapshot, else the directory: a student who enrolled in
+        # the second before their registration event arrived still gets a name.
+        student_name=enrollment.student_name or directory_name,
         status=enrollment.status,
         enrolled_at=enrollment.enrolled_at,
         withdrawn_at=enrollment.withdrawn_at,
+        completed_at=enrollment.completed_at,
+        lessons_completed=enrollment.lessons_completed,
+        lessons_total=total,
+        progress_percent=progress_percent(enrollment.lessons_completed, total),
     )
 
 
-def _base_query() -> Select[tuple[Enrollment, str]]:
-    return (
-        select(Enrollment, CourseCache.title)
+def _base_query() -> Select[_Row]:
+    # cast: the outer join makes the directory name nullable, which the column's own
+    # (non-null) type can't express.
+    return cast(
+        Select[_Row],
+        select(Enrollment, CourseCache.title, CourseCache.lesson_ids, StudentDirectory.full_name)
         .join(CourseCache, CourseCache.course_id == Enrollment.course_id)
-        .order_by(Enrollment.enrolled_at.desc(), Enrollment.id.desc())
+        .outerjoin(StudentDirectory, StudentDirectory.user_id == Enrollment.student_id)
+        .order_by(Enrollment.enrolled_at.desc(), Enrollment.id.desc()),
     )
 
 
 async def _page(
     session: AsyncSession,
-    stmt: Select[tuple[Enrollment, str]],
+    stmt: Select[_Row],
     *,
     limit: int,
     cursor: str | None,
@@ -177,7 +214,7 @@ async def _page(
                 and_(Enrollment.enrolled_at == at, Enrollment.id < last_id),
             )
         )
-    rows = list((await session.execute(stmt.limit(limit + 1))).all())
+    rows = list((await session.execute(stmt.limit(limit + 1))).tuples())
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None
@@ -187,28 +224,36 @@ async def _page(
             {"enrolled_at": last.enrolled_at.isoformat(), "id": str(last.id)}
         )
     return CursorPage(
-        items=[_public(enrollment, title) for enrollment, title in rows],
-        next_cursor=next_cursor,
-        has_more=has_more,
+        items=[_public(row) for row in rows], next_cursor=next_cursor, has_more=has_more
     )
+
+
+async def ensure_can_view(
+    session: AsyncSession, enrollment: Enrollment, *, current_user_id: uuid.UUID, role: str
+) -> None:
+    """The student, the course's instructor, and admins. Anyone else gets a 404, not a
+    403 — an enrollment id shouldn't confirm someone else's enrollment."""
+    if role == ADMIN_ROLE or current_user_id == enrollment.student_id:
+        return
+    instructor_id = await session.scalar(
+        select(CourseCache.instructor_id).where(CourseCache.course_id == enrollment.course_id)
+    )
+    if instructor_id != current_user_id:
+        raise EnrollmentNotFoundError()
 
 
 async def get_enrollment(
     session: AsyncSession, enrollment_id: uuid.UUID, *, current_user_id: uuid.UUID, role: str
 ) -> EnrollmentPublic:
-    """Visible to the student, the course's instructor, and admins. Anyone else gets a
-    404, not a 403 — an enrollment id shouldn't confirm someone else's enrollment."""
-    row = (await session.execute(_base_query().where(Enrollment.id == enrollment_id))).first()
+    row = (
+        (await session.execute(_base_query().where(Enrollment.id == enrollment_id)))
+        .tuples()
+        .first()
+    )
     if row is None:
         raise EnrollmentNotFoundError()
-    enrollment, title = row
-    if role != _ADMIN_ROLE and current_user_id != enrollment.student_id:
-        instructor_id = await session.scalar(
-            select(CourseCache.instructor_id).where(CourseCache.course_id == enrollment.course_id)
-        )
-        if instructor_id != current_user_id:
-            raise EnrollmentNotFoundError()
-    return _public(enrollment, title)
+    await ensure_can_view(session, row[0], current_user_id=current_user_id, role=role)
+    return _public(row)
 
 
 async def list_for_student(
@@ -235,7 +280,7 @@ async def enrollment_history(
     cursor: str | None,
 ) -> CursorPage[EnrollmentPublic]:
     """Every enrollment the user ever had, withdrawals included. Self or admin."""
-    if role != _ADMIN_ROLE and user_id != current_user_id:
+    if role != ADMIN_ROLE and user_id != current_user_id:
         raise ForbiddenError("You can only view your own enrollment history")
     return await list_for_student(
         session, student_id=user_id, status=None, limit=limit, cursor=cursor
@@ -255,46 +300,9 @@ async def course_roster(
     course = await session.get(CourseCache, course_id)
     if course is None:
         raise CourseNotFoundError()
-    if role != _ADMIN_ROLE and course.instructor_id != current_user_id:
+    if role != ADMIN_ROLE and course.instructor_id != current_user_id:
         raise ForbiddenError("Only the course's instructor or an admin can view its roster")
     stmt = _base_query().where(Enrollment.course_id == course_id)
     if status is not None:
         stmt = stmt.where(Enrollment.status == status)
     return await _page(session, stmt, limit=limit, cursor=cursor)
-
-
-# --- course_cache ------------------------------------------------------------------
-
-
-async def apply_course_event(session: AsyncSession, event: CourseEventV1) -> bool:
-    """Upsert the course's snapshot. Returns False if the event was a duplicate or older
-    than what's held. Two guards, for two different failures:
-
-    - inbox claim on event_id  → the same event delivered twice
-    - revision comparison      → two different events delivered out of order
-    """
-    if not await claim_event(
-        session, event_id=event.event_id, consumer_group=COURSE_CACHE_CONSUMER
-    ):
-        return False
-
-    snapshot = event.course
-    values = {
-        "title": snapshot.title,
-        "status": snapshot.status,
-        "instructor_id": snapshot.instructor_id,
-        "max_enrollments": snapshot.max_enrollments,
-        "published_at": snapshot.published_at,
-        "revision": snapshot.revision,
-        "synced_at": _now(),
-    }
-    insert_stmt = insert(CourseCache).values(
-        course_id=snapshot.course_id, active_enrollments=0, **values
-    )
-    upsert = insert_stmt.on_conflict_do_update(
-        index_elements=[CourseCache.course_id],
-        # active_enrollments is learning's own column — never taken from an event.
-        set_=values,
-        where=CourseCache.revision < insert_stmt.excluded.revision,
-    ).returning(CourseCache.course_id)
-    return (await session.execute(upsert)).scalar_one_or_none() is not None

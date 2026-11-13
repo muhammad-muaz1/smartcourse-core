@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from sqlalchemy import select
 
 from platform_core.exceptions import ConflictError, RateLimitedError, UnauthorizedError
 from platform_core.security import decode_access_token
+from smartcourse_contracts.user_events import UserEventV1
 from src.config import SecuritySettings
 from src.core.security import (
     access_token_denylist_key,
@@ -20,6 +22,7 @@ from src.core.security import (
 )
 from src.db import postgres
 from src.db import redis as redis_db
+from src.db.outbox import OutboxMessage
 from src.modules.auth import service
 from src.modules.users import service as users_service
 from src.modules.users.models import UserRole
@@ -77,7 +80,6 @@ async def _register(
             role=role,
             client_ip="203.0.113.1",
             settings=settings,
-            sender=_CapturingSender(),
         )
     # Return only after the loop: get_session commits when it resumes past its yield,
     # and a return inside the loop would abandon it there with nothing committed.
@@ -104,25 +106,21 @@ class TestRegister:
         with pytest.raises(ConflictError):
             await _register(security_settings, email="dupe@example.com")
 
-    async def test_sends_a_welcome_notification(
+    async def test_announces_the_account_in_the_same_transaction(
         self, db_and_redis: None, security_settings: SecuritySettings
     ) -> None:
-        sender = _CapturingSender()
-        async for session in postgres.get_session():
-            await service.register(
-                session,
-                redis_db.get_redis(),
-                email="welcome@example.com",
-                password="correcthorse123",
-                full_name="Welcome Test",
-                role=UserRole.STUDENT,
-                client_ip="203.0.113.2",
-                settings=security_settings,
-                sender=sender,
-            )
+        """The welcome message is notification's job now: register writes
+        user.registered.v1 to the outbox, committed with the user row."""
+        user_id = await _register(security_settings, email="welcome@example.com")
 
-        assert len(sender.calls) == 1
-        assert sender.calls[0]["to"] == "welcome@example.com"
+        async for session in postgres.get_session():
+            rows = (await session.execute(select(OutboxMessage))).scalars().all()
+        assert [row.topic for row in rows] == ["smartcourse.user.registered.v1"]
+        event = UserEventV1.model_validate(rows[0].payload)
+        assert event.user.user_id == user_id
+        assert event.user.email == "welcome@example.com"
+        assert event.user.role == "student"
+        assert rows[0].aggregate_id == user_id
 
     async def test_throttles_by_ip_after_configured_attempts(
         self, db_and_redis: None, security_settings: SecuritySettings
@@ -139,7 +137,6 @@ class TestRegister:
                     role=UserRole.STUDENT,
                     client_ip="203.0.113.9",
                     settings=security_settings,
-                    sender=_CapturingSender(),
                 )
 
         with pytest.raises(RateLimitedError):
@@ -153,7 +150,6 @@ class TestRegister:
                     role=UserRole.STUDENT,
                     client_ip="203.0.113.9",
                     settings=security_settings,
-                    sender=_CapturingSender(),
                 )
 
 

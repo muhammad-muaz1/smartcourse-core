@@ -17,6 +17,7 @@ from platform_core.handlers import register_exception_handlers
 from platform_core.health import Check, build_health_router
 from platform_core.logging import configure_logging
 from platform_core.middleware import install_middleware
+from platform_core.telemetry import configure_tracing, instrument_httpx_client
 from src.auth import JWKSVerifier
 from src.config import Settings, get_settings
 from src.proxy import forward, resolve_upstream, route_table
@@ -62,7 +63,11 @@ def create_app(
     # already gets; its warnings and errors still come through.
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
+    configure_tracing(service_name=settings.app.service_name, settings=settings.telemetry)
     client = httpx.AsyncClient(timeout=upstreams.timeout_seconds, transport=transport)
+    # Each upstream call is a client span, and carries traceparent to the service: one
+    # trace from the edge to the last worker (CLAUDE.md §11).
+    instrument_httpx_client(client)
     verifier = JWKSVerifier(
         client,
         jwks_url=f"{upstreams.identity_url}/.well-known/jwks.json",
@@ -87,6 +92,8 @@ def create_app(
         "identity": _upstream_check(client, upstreams.identity_url),
         "course": _upstream_check(client, upstreams.course_url),
         "learning": _upstream_check(client, upstreams.learning_url),
+        "notification": _upstream_check(client, upstreams.notification_url),
+        "analytics": _upstream_check(client, upstreams.analytics_url),
     }
     app.include_router(build_health_router(checks=checks, health=settings.health, app=settings.app))
 

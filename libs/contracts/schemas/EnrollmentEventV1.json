@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "EnrollmentSnapshotV1": {
+      "properties": {
+        "enrollment_id": {
+          "format": "uuid",
+          "title": "Enrollment Id",
+          "type": "string"
+        },
+        "student_id": {
+          "format": "uuid",
+          "title": "Student Id",
+          "type": "string"
+        },
+        "student_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Student Name"
+        },
+        "course_id": {
+          "format": "uuid",
+          "title": "Course Id",
+          "type": "string"
+        },
+        "course_title": {
+          "title": "Course Title",
+          "type": "string"
+        },
+        "instructor_id": {
+          "format": "uuid",
+          "title": "Instructor Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "enrolled_at": {
+          "format": "date-time",
+          "title": "Enrolled At",
+          "type": "string"
+        },
+        "withdrawn_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Withdrawn At"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "lessons_completed": {
+          "default": 0,
+          "title": "Lessons Completed",
+          "type": "integer"
+        },
+        "lessons_total": {
+          "default": 0,
+          "title": "Lessons Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enrollment_id",
+        "student_id",
+        "course_id",
+        "course_title",
+        "instructor_id",
+        "status",
+        "enrolled_at"
+      ],
+      "title": "EnrollmentSnapshotV1",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "enum": [
+        "enrollment.created.v1",
+        "enrollment.withdrawn.v1",
+        "enrollment.completed.v1"
+      ],
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "enrollment": {
+      "$ref": "#/$defs/EnrollmentSnapshotV1"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "enrollment"
+  ],
+  "title": "EnrollmentEventV1",
+  "type": "object"
+}

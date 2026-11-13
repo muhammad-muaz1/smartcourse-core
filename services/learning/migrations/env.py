@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from src.config import get_settings
-from src.db import inbox  # noqa: F401
+from src.db import inbox, outbox  # noqa: F401
 from src.db.base import Base
 
 # Import every module that defines Base-mapped models here so autogenerate can see them.

@@ -1,15 +1,13 @@
 [project]
 name = "smartcourse-learning"
 version = "0.1.0"
-description = "SmartCourse learning service — enrollments, course_cache; progress and certificates to come"
+description = "SmartCourse learning service — enrollments, progress, completions; course_cache and student_directory read models"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
 dependencies = [
   "smartcourse-platform-core",
   "smartcourse-contracts",
-  # Receives course.* events on learning-tq (worker process only).
-  "temporalio[pydantic]>=1.36,<2",
-  # Idempotency-Key responses for POST /courses/{id}/enrollments.
+  # Idempotency-Key responses for enrolment and lesson completion.
   "redis>=8.1,<9",
   "fastapi>=0.141,<0.142",
   "uvicorn[standard]>=0.53,<0.54",

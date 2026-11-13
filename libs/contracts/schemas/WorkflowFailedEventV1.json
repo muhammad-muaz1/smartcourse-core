@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "WorkflowFailureV1": {
+      "properties": {
+        "service": {
+          "title": "Service",
+          "type": "string"
+        },
+        "workflow": {
+          "title": "Workflow",
+          "type": "string"
+        },
+        "reference_id": {
+          "title": "Reference Id",
+          "type": "string"
+        },
+        "failed_step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed Step"
+        },
+        "error": {
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "workflow",
+        "reference_id",
+        "error"
+      ],
+      "title": "WorkflowFailureV1",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "const": "workflow.failed.v1",
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "failure": {
+      "$ref": "#/$defs/WorkflowFailureV1"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "failure"
+  ],
+  "title": "WorkflowFailedEventV1",
+  "type": "object"
+}

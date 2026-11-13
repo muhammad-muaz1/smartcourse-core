@@ -11,6 +11,7 @@ from platform_core.idempotency import IdempotencyOptions, IdempotentRoute
 from platform_core.logging import configure_logging
 from platform_core.middleware import install_middleware
 from platform_core.security import subject_from_authorization
+from platform_core.telemetry import configure_tracing
 from src.config import Settings, get_settings
 from src.core.router import build_api_router
 from src.db import postgres, redis
@@ -59,6 +60,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         level=settings.log.level,
         json_logs=settings.log.json_logs,
     )
+
+    configure_tracing(service_name=settings.app.service_name, settings=settings.telemetry)
 
     app = FastAPI(
         title=settings.app.service_name,

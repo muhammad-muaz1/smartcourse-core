@@ -9,6 +9,7 @@ from platform_core.handlers import register_exception_handlers
 from platform_core.health import Check, build_health_router, log_unavailable_dependencies
 from platform_core.logging import configure_logging
 from platform_core.middleware import install_middleware
+from platform_core.telemetry import configure_tracing
 from src.config import Settings, get_settings
 from src.core.router import build_api_router
 from src.core.security import build_jwks
@@ -43,6 +44,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         level=settings.log.level,
         json_logs=settings.log.json_logs,
     )
+
+    configure_tracing(service_name=settings.app.service_name, settings=settings.telemetry)
 
     app = FastAPI(
         title=settings.app.service_name,

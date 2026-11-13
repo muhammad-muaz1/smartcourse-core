@@ -5,11 +5,8 @@ deterministic: no I/O, no clock, no randomness — all of that happens in activi
 activity module is imported "passed through" so the sandbox doesn't re-import
 SQLAlchemy and friends on every replay.
 
-``DeliverCourseEventWorkflow`` carries one ``course.*.v1`` event into learning's
-``course_cache`` by scheduling learning's activity — by name, on learning's queue — so
-course never imports learning's code and never holds an HTTP client for it. It is the
-week-2 transport behind the outbox; Kafka replaces it without touching the API or the
-outbox (docs/adr/0011).
+``course.*.v1`` events no longer travel through Temporal: the relay delivers them to
+Kafka (docs/adr/0012). Temporal orchestrates; Kafka informs.
 """
 
 from datetime import timedelta
@@ -19,11 +16,6 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from smartcourse_contracts.course_events import (
-        APPLY_COURSE_EVENT_ACTIVITY,
-        LEARNING_TASK_QUEUE,
-        CourseEventV1,
-    )
     from src.modules.courses.activities import (
         RUN_NOT_FOUND,
         VALIDATION_FAILED,
@@ -104,22 +96,4 @@ class PublishCourseWorkflow:
             ) from exc
 
 
-@workflow.defn(name="course.deliver_event.v1")
-class DeliverCourseEventWorkflow:
-    @workflow.run
-    async def run(self, event: CourseEventV1) -> None:
-        await workflow.execute_activity(
-            APPLY_COURSE_EVENT_ACTIVITY,
-            event,
-            task_queue=LEARNING_TASK_QUEUE,
-            start_to_close_timeout=timedelta(seconds=30),
-            # Unlimited attempts with capped backoff: if learning is down, its cache
-            # catches up when it returns. The event is durable in Temporal meanwhile.
-            retry_policy=RetryPolicy(
-                initial_interval=timedelta(seconds=1),
-                maximum_interval=timedelta(minutes=1),
-            ),
-        )
-
-
-WORKFLOWS = [PublishCourseWorkflow, DeliverCourseEventWorkflow]
+WORKFLOWS = [PublishCourseWorkflow]

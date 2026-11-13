@@ -12,6 +12,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.modules.users.events import record_user_registered
 from src.modules.users.models import User, UserRole
 
 
@@ -27,7 +28,10 @@ async def get_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | None:
 async def create_user(
     session: AsyncSession, *, email: str, hashed_password: str, full_name: str, role: UserRole
 ) -> User:
+    """Every account — self-registered or created by ``create_admin`` — is announced as
+    ``user.registered.v1`` in the same transaction, so no consumer misses one."""
     user = User(email=email, hashed_password=hashed_password, full_name=full_name, role=role)
     session.add(user)
     await session.flush()
+    record_user_registered(session, user)
     return user

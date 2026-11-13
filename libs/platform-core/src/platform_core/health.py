@@ -1,4 +1,4 @@
-"""``GET /health`` and ``GET /version`` for every service, plus the concurrent
+"""``GET /health``, ``GET /version`` and ``GET /metrics`` for every service, plus the concurrent
 per-dependency checks behind them.
 
 /health: overall status + per-dependency breakdown, 200 when healthy, 503 otherwise.
@@ -19,10 +19,11 @@ from collections.abc import Awaitable, Callable, Mapping
 
 import structlog
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from platform_core.config import AppSettings, HealthSettings
+from platform_core.metrics import metrics_response
 
 logger = structlog.get_logger(__name__)
 
@@ -119,5 +120,9 @@ def build_health_router(
         return VersionResponse(
             service=app.service_name, version=app.git_sha, build_time=app.build_time
         )
+
+    @router.get("/metrics", include_in_schema=False)
+    async def metrics_route() -> Response:
+        return metrics_response()
 
     return router

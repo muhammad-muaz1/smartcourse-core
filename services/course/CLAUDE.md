@@ -11,11 +11,11 @@ authoritative for what a course contains and whether it is published, and it own
 publishing saga.
 
 **Database:** `course_db` (PostgreSQL). No other service reads it.
-**Task queue:** `course-tq` (Temporal) — `PublishCourseWorkflow`, `DeliverCourseEventWorkflow`.
+**Task queue:** `course-tq` (Temporal) — `PublishCourseWorkflow`.
 **Redis DB index:** `1` — `Idempotency-Key` responses for publish; the catalogue cache later.
 **Port (local):** `8002`
 **Processes:** the API (`python -m src.main`) and the worker (`python -m src.worker`:
-Temporal worker + outbox relay). The API never talks to Temporal.
+Temporal worker + outbox relay). The API never talks to Temporal or Kafka.
 
 ## Modules
 
@@ -36,9 +36,10 @@ anything but `publishing → archived`. Content (modules, lessons) is editable o
 
 ## Events produced
 
-All via `outbox_messages`, in the same transaction as the change, delivered by the relay.
-Every `course.*.v1` carries the full snapshot (`smartcourse_contracts.course_events`) and a
-`revision` that increases with every change.
+All via `outbox_messages`, in the same transaction as the change, delivered by the relay —
+to Kafka, except the internal publish-requested message (a Temporal start). Every
+`course.*.v1` carries the full snapshot (`smartcourse_contracts.course_events`), including
+the lesson list in reading order, and a `revision` that increases with every change.
 
 | Event | Emitted when |
 | --- | --- |
@@ -47,11 +48,10 @@ Every `course.*.v1` carries the full snapshot (`smartcourse_contracts.course_eve
 | `course.published.v1` | publish saga's last step |
 | `course.unpublished.v1` | `POST /courses/{id}/unpublish` |
 | `course.archived.v1` | `DELETE /courses/{id}` |
+| `workflow.failed.v1` | the publish saga compensated (in `fail_publish`'s transaction) |
 | `course.publish_requested.v1` | internal: the relay turns it into a `PublishCourseWorkflow` start |
 
-Until Kafka exists, the relay delivers `course.*.v1` to learning by starting
-`DeliverCourseEventWorkflow`, which runs learning's `learning.apply_course_event.v1`
-activity on `learning-tq` (docs/adr/0011).
+Consumers: learning (`course_cache`), analytics (`course_facts`) — docs/adr/0012.
 
 ## Events consumed
 

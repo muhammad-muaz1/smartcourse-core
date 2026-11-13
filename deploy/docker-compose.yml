@@ -1,7 +1,10 @@
-# Local stack: shared infrastructure + every service + the gateway.
+# Local stack: shared infrastructure + every service, its workers, and the gateway.
 #   make up             everything
 #   make up s=course    one service plus what it depends on
 # Credentials here are throwaway local-container values, never real ones.
+#
+# UIs: gateway :8000 · Temporal :8233 · Jaeger :16686 · Prometheus :9090 ·
+#      Grafana :3001 (anonymous viewer) · RabbitMQ :15672 (guest/guest)
 
 x-service-env: &service-env
   SMARTCOURSE_APP__ENV: local
@@ -9,8 +12,16 @@ x-service-env: &service-env
   # Inside the compose network only the gateway fronts the services; trust its
   # X-Forwarded-For so per-IP throttles see the real client.
   FORWARDED_ALLOW_IPS: "*"
+  SMARTCOURSE_TELEMETRY__OTLP_ENDPOINT: http://jaeger:4318
+  SMARTCOURSE_KAFKA__BOOTSTRAP_SERVERS: kafka:9092
+
+x-public-key: &public-key
+  # The public key only — services verify tokens, only identity signs them.
+  - ../secrets/jwt_public.pem:/run/secrets/jwt/jwt_public.pem:ro
 
 services:
+  # --- infrastructure -----------------------------------------------------------------
+
   postgres:
     image: postgres:16
     environment:
@@ -49,6 +60,67 @@ services:
       timeout: 3s
       retries: 30
 
+  # Single-node KRaft broker. Two listeners: kafka:9092 inside the network, localhost:29092
+  # from the host. Topics are created by the workers (retention: forever for events).
+  kafka:
+    image: apache/kafka:4.4.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports: ["29092:29092"]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # The Celery broker, as the brief specifies.
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    ports: ["16686:16686", "4317:4317", "4318:4318"]
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    # :3000 is the frontend's CORS origin by convention; keep it free.
+    ports: ["3001:3000"]
+    depends_on: [prometheus, jaeger]
+
+  # --- identity -----------------------------------------------------------------------
+
   identity:
     build: { context: .., dockerfile: services/identity/Dockerfile }
     # Dev convenience only: migrate on start. A production deploy runs migrations as
@@ -68,6 +140,19 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
+  # Outbox relay: user.registered.v1 → Kafka.
+  identity-worker:
+    build: { context: .., dockerfile: services/identity/Dockerfile }
+    command: ["python", "-m", "src.worker"]
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/identity_db
+    depends_on:
+      identity: { condition: service_started }  # its container runs the migrations
+      kafka: { condition: service_healthy }
+
+  # --- course -------------------------------------------------------------------------
+
   course:
     build: { context: .., dockerfile: services/course/Dockerfile }
     command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8002"
@@ -76,16 +161,14 @@ services:
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
       SMARTCOURSE_REDIS__URL: redis://redis:6379/1
       SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
-    volumes:
-      # The public key only — course verifies tokens, it never signs them.
-      - ../secrets/jwt_public.pem:/run/secrets/jwt/jwt_public.pem:ro
+    volumes: *public-key
     ports: ["8002:8002"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
-  # Temporal worker on course-tq (publish saga, event delivery) + the outbox relay.
-  # Same image as the API; the API never talks to Temporal.
+  # Temporal worker on course-tq (publish saga) + the outbox relay (course.* → Kafka).
+  # Same image as the API; the API never talks to Temporal or Kafka.
   course-worker:
     build: { context: .., dockerfile: services/course/Dockerfile }
     command: ["python", "-m", "src.worker"]
@@ -94,8 +177,11 @@ services:
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
       SMARTCOURSE_TEMPORAL__TARGET: temporal:7233
     depends_on:
-      course: { condition: service_started }  # its container runs the migrations
+      course: { condition: service_started }
       temporal: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  # --- learning -----------------------------------------------------------------------
 
   learning:
     build: { context: .., dockerfile: services/learning/Dockerfile }
@@ -105,35 +191,111 @@ services:
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/learning_db
       SMARTCOURSE_REDIS__URL: redis://redis:6379/3
       SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
-    volumes:
-      - ../secrets/jwt_public.pem:/run/secrets/jwt/jwt_public.pem:ro
+    volumes: *public-key
     ports: ["8003:8003"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
-  # Temporal worker on learning-tq: applies course.* events to course_cache.
+  # Kafka consumer (course.* → course_cache, user.registered → student_directory) +
+  # outbox relay (enrollment.* → Kafka).
   learning-worker:
     build: { context: .., dockerfile: services/learning/Dockerfile }
     command: ["python", "-m", "src.worker"]
     environment:
       <<: *service-env
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/learning_db
-      SMARTCOURSE_TEMPORAL__TARGET: temporal:7233
     depends_on:
       learning: { condition: service_started }
-      temporal: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  # --- notification -------------------------------------------------------------------
+
+  notification:
+    build: { context: .., dockerfile: services/notification/Dockerfile }
+    command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8004"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/notification_db
+      SMARTCOURSE_REDIS__URL: redis://redis:6379/4
+      SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+    volumes: *public-key
+    ports: ["8004:8004"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Kafka consumer (events → notification rows, enqueue after commit) + outbox relay.
+  notification-worker:
+    build: { context: .., dockerfile: services/notification/Dockerfile }
+    command: ["python", "-m", "src.worker"]
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/notification_db
+      SMARTCOURSE_CELERY__BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      notification: { condition: service_started }
+      kafka: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  # Celery: delivery attempts + the beat sweep that re-enqueues lost deliveries.
+  notification-celery:
+    build: { context: .., dockerfile: services/notification/Dockerfile }
+    command: >
+      sh -c "mkdir -p /tmp/prom && exec celery -A src.celery_app worker --beat
+      --loglevel=INFO --queues=notifications,maintenance --schedule=/tmp/celerybeat-schedule"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/notification_db
+      SMARTCOURSE_CELERY__BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prom
+    depends_on:
+      notification: { condition: service_started }
+      rabbitmq: { condition: service_healthy }
+
+  # --- analytics ----------------------------------------------------------------------
+
+  analytics:
+    build: { context: .., dockerfile: services/analytics/Dockerfile }
+    command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8005"
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/analytics_db
+      SMARTCOURSE_REDIS__URL: redis://redis:6379/5
+      SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+    volumes: *public-key
+    ports: ["8005:8005"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Kafka consumer over every topic → fact tables.
+  analytics-worker:
+    build: { context: .., dockerfile: services/analytics/Dockerfile }
+    command: ["python", "-m", "src.worker"]
+    environment:
+      <<: *service-env
+      SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/analytics_db
+    depends_on:
+      analytics: { condition: service_started }
+      kafka: { condition: service_healthy }
+
+  # --- edge ---------------------------------------------------------------------------
 
   gateway:
     build: { context: .., dockerfile: gateway/Dockerfile }
     environment:
       SMARTCOURSE_APP__ENV: local
+      SMARTCOURSE_TELEMETRY__OTLP_ENDPOINT: http://jaeger:4318
       SMARTCOURSE_UPSTREAMS__IDENTITY_URL: http://identity:8001
       SMARTCOURSE_UPSTREAMS__COURSE_URL: http://course:8002
       SMARTCOURSE_UPSTREAMS__LEARNING_URL: http://learning:8003
+      SMARTCOURSE_UPSTREAMS__NOTIFICATION_URL: http://notification:8004
+      SMARTCOURSE_UPSTREAMS__ANALYTICS_URL: http://analytics:8005
     ports: ["8000:8000"]
-    depends_on: [identity, course, learning]
+    depends_on: [identity, course, learning, notification, analytics]
 
 volumes:
   postgres-data:
   temporal-data:
+  kafka-data:

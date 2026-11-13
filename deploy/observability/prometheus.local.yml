@@ -1,0 +1,39 @@
+# Prometheus for `make prometheus` (no Docker): every API and worker on localhost.
+# deploy/observability/prometheus.yml is the same set of jobs for the compose network.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ["localhost:8000"]
+        labels: { service: gateway }
+      - targets: ["localhost:8001"]
+        labels: { service: identity }
+      - targets: ["localhost:8002"]
+        labels: { service: course }
+      - targets: ["localhost:8003"]
+        labels: { service: learning }
+      - targets: ["localhost:8004"]
+        labels: { service: notification }
+      - targets: ["localhost:8005"]
+        labels: { service: analytics }
+
+  - job_name: worker
+    static_configs:
+      - targets: ["localhost:9101"]
+        labels: { service: identity }
+      - targets: ["localhost:9102"]
+        labels: { service: course }
+      - targets: ["localhost:9103"]
+        labels: { service: learning }
+      - targets: ["localhost:9104"]
+        labels: { service: notification }
+      - targets: ["localhost:9105"]
+        labels: { service: analytics }
+
+  - job_name: celery
+    static_configs:
+      - targets: ["localhost:9114"]
+        labels: { service: notification }

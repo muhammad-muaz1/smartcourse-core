@@ -5,7 +5,8 @@ the transitions the ``PublishCourseWorkflow`` activities perform (API design §6
     relay         ──▶ starts PublishCourseWorkflow(run_id)
     validate      ──▶ run=running; checks the content tree; records the step       [1 tx]
     mark_published──▶ course=published + outbox(course.published.v1), run=succeeded [1 tx]
-    on any failure──▶ course=failed  + outbox(course.updated.v1),   run=failed     [1 tx]
+    on any failure──▶ course=failed  + outbox(course.updated.v1, workflow.failed.v1),
+                      run=failed                                                   [1 tx]
 
 Each workflow-side function is safe to run twice (activities are at-least-once): it
 checks the run's status before acting and returns quietly if the work is already done.
@@ -19,7 +20,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.exceptions import NotFoundError
-from src.modules.courses.events import record_course_event, record_publish_requested
+from src.modules.courses.events import (
+    record_course_event,
+    record_publish_failed,
+    record_publish_requested,
+)
 from src.modules.courses.models import (
     PUBLISHABLE_STATUSES,
     Course,
@@ -239,4 +244,6 @@ async def fail_publish(
     if course.status == CourseStatus.PUBLISHING:
         course.status = CourseStatus.FAILED
         await record_course_event(session, course, "course.updated.v1")
+    # Analytics' "workflow issues" metric, in the same transaction as the failure.
+    record_publish_failed(session, run)
     await session.flush()

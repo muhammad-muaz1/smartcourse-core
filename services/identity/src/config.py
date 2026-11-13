@@ -19,9 +19,13 @@ from platform_core.config import (
     CorsSettings,
     HealthSettings,
     JWTVerifySettings,
+    KafkaSettings,
     LogSettings,
+    MetricsSettings,
+    OutboxSettings,
     PostgresSettings,
     RedisSettings,
+    TelemetrySettings,
 )
 
 
@@ -38,6 +42,10 @@ class IdentityRedisSettings(RedisSettings):
     # DB 0: the auth keys the monolith already wrote (denylist, lockouts, reset
     # tokens) live here, so they stay valid across the split.
     url: str = "redis://localhost:6379/0"
+
+
+class IdentityMetricsSettings(MetricsSettings):
+    worker_port: int = 9101
 
 
 class SecuritySettings(JWTVerifySettings):
@@ -70,6 +78,11 @@ class Settings(BaseSettings):
     redis: IdentityRedisSettings = Field(default_factory=IdentityRedisSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+    # Used by the worker process (src/worker.py) only — the API never talks to Kafka.
+    outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    kafka: KafkaSettings = Field(default_factory=KafkaSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    metrics: IdentityMetricsSettings = Field(default_factory=IdentityMetricsSettings)
 
 
 @lru_cache

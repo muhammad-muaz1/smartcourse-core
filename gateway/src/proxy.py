@@ -68,6 +68,9 @@ def route_table(*, api_prefix: str, upstreams: UpstreamSettings) -> list[Route]:
         (_prefix(f"{api_prefix}/courses"), upstreams.course_url),
         (_prefix(f"{api_prefix}/modules"), upstreams.course_url),
         (_prefix(f"{api_prefix}/lessons"), upstreams.course_url),
+        # notification, analytics
+        (_prefix(f"{api_prefix}/notifications"), upstreams.notification_url),
+        (_prefix(f"{api_prefix}/analytics"), upstreams.analytics_url),
     ]
 
 

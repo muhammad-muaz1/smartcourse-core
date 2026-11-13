@@ -37,9 +37,9 @@ class NotificationSender(Protocol):
 
 
 class LoggingNotificationSender:
-    """Only implementation until Celery exists — logs instead of sending. Swapping in a
-    real sender later is a one-line change at the call site, not a route/service
-    change (API_DESIGN.md §3)."""
+    """Password-reset delivery only — logs instead of sending. Deliberately not routed
+    through Kafka and the notification service: a reset token on a topic retained
+    forever would be a credential in the event log (docs/adr/0012)."""
 
     async def send(self, *, to: str, subject: str, body: str) -> None:
         await logger.ainfo("notification_stub_sent", to=to, subject=subject)
@@ -103,8 +103,9 @@ async def register(
     role: UserRole,
     client_ip: str,
     settings: SecuritySettings,
-    sender: NotificationSender,
 ) -> User:
+    """The welcome message is the notification service's job: it reacts to the
+    ``user.registered.v1`` event ``create_user`` writes in this transaction."""
     throttle_key = f"auth:register_throttle:{client_ip}"
     attempts = await redis.incr(throttle_key)
     if attempts == 1:
@@ -122,7 +123,6 @@ async def register(
         full_name=full_name,
         role=role,
     )
-    await sender.send(to=email, subject="Welcome to SmartCourse", body=f"Welcome, {full_name}!")
     return user
 
 

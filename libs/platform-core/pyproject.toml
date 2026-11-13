@@ -5,6 +5,8 @@ description = "Mechanics shared by every SmartCourse service — never a domain 
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
 dependencies = [
+  # The dead-letter envelope the consumer runner produces is a cross-service contract.
+  "smartcourse-contracts",
   "fastapi>=0.141,<0.142",
   "pydantic>=2.13,<3",
   "sqlalchemy[asyncio]>=2.0,<2.1",
@@ -13,7 +15,26 @@ dependencies = [
   "structlog>=26.1,<27",
   "pyjwt[crypto]>=2.14,<3",
   "cryptography>=44,<51",
+  # Event spine (outbox relay, consumers). asyncio-native: every process that touches
+  # Kafka runs an event loop with async SQLAlchemy, so no thread hop (docs/adr/0012).
+  "aiokafka>=0.15,<0.16",
+  # Metrics: prometheus-client directly, not the OTel bridge (docs/adr/0001 §7).
+  "prometheus-client>=0.26,<0.27",
+  # Tracing: OTel → OTLP/HTTP → Jaeger. Instrumentations are beta and pinned exactly
+  # (docs/adr/0001).
+  "opentelemetry-api>=1.45,<2",
+  "opentelemetry-sdk>=1.45,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
+  "opentelemetry-instrumentation-fastapi==0.66b2",
+  "opentelemetry-instrumentation-sqlalchemy==0.66b2",
+  "opentelemetry-instrumentation-redis==0.66b2",
+  "opentelemetry-instrumentation-httpx==0.66b2",
+  # instrument_httpx_client's signature (the gateway's upstream client).
+  "httpx>=0.28,<0.29",
 ]
+
+[tool.uv.sources]
+smartcourse-contracts = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

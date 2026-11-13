@@ -3,3 +3,5 @@
 CREATE DATABASE identity_db;
 CREATE DATABASE course_db;
 CREATE DATABASE learning_db;
+CREATE DATABASE notification_db;
+CREATE DATABASE analytics_db;

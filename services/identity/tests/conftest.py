@@ -8,6 +8,7 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.community.redis import RedisContainer
 
 from platform_core.logging import clear_request_context
+from platform_core.testing import throwaway_postgres, throwaway_redis
 from src.config import SecuritySettings
 
 
@@ -24,13 +25,13 @@ def _reset_request_context() -> None:
 
 @pytest.fixture(scope="session")
 def postgres_container() -> Iterator[PostgresContainer]:
-    with PostgresContainer("postgres:16", driver="asyncpg") as container:
+    with throwaway_postgres() as container:  # Docker, or SMARTCOURSE_TEST_POSTGRES_URL
         yield container
 
 
 @pytest.fixture(scope="session")
 def redis_container() -> Iterator[RedisContainer]:
-    with RedisContainer("redis:7") as container:
+    with throwaway_redis() as container:  # Docker, or SMARTCOURSE_TEST_REDIS_URL
         yield container
 
 

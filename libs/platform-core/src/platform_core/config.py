@@ -99,3 +99,39 @@ class IdempotencySettings(BaseModel):
     # How long a key stays locked while its first request is still running. Longer than
     # any request should ever take; a crashed request frees the key after this.
     in_flight_ttl_seconds: int = 60
+
+
+class TelemetrySettings(BaseModel):
+    """Tracing export. With no endpoint, spans are still created (so trace ids reach log
+    lines and Kafka headers) but nothing is exported — a missing Jaeger never breaks a
+    service."""
+
+    # OTLP/HTTP base URL, e.g. http://localhost:4318 (Jaeger). Empty = don't export.
+    otlp_endpoint: str = ""
+    # Fraction of new traces recorded. A child always follows its parent's decision, so
+    # a trace is never cut in half between services.
+    sample_ratio: float = 1.0
+
+
+class MetricsSettings(BaseModel):
+    """Worker processes have no HTTP server, so each serves /metrics on its own port.
+    The API process serves /metrics on its normal port and ignores this."""
+
+    worker_port: int = 0  # 0 = don't serve
+
+
+class KafkaSettings(BaseModel):
+    bootstrap_servers: str = "localhost:9092"
+    # Topic defaults used when a worker creates a topic that doesn't exist yet.
+    partitions: int = 3
+    replication_factor: int = 1
+    # In-process attempts at one message before it is dead-lettered. The partition
+    # waits meanwhile — order within an aggregate matters more than throughput.
+    consumer_max_attempts: int = 5
+    consumer_retry_backoff_seconds: float = 0.5
+    consumer_max_backoff_seconds: float = 10.0
+
+
+class OutboxSettings(BaseModel):
+    poll_interval_seconds: float = 0.5
+    batch_size: int = 100

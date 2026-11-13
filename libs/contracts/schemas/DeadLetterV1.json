@@ -1,0 +1,62 @@
+{
+  "properties": {
+    "event_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Id"
+    },
+    "original_topic": {
+      "title": "Original Topic",
+      "type": "string"
+    },
+    "partition": {
+      "title": "Partition",
+      "type": "integer"
+    },
+    "offset": {
+      "title": "Offset",
+      "type": "integer"
+    },
+    "consumer_group": {
+      "title": "Consumer Group",
+      "type": "string"
+    },
+    "attempts": {
+      "title": "Attempts",
+      "type": "integer"
+    },
+    "error": {
+      "title": "Error",
+      "type": "string"
+    },
+    "failed_at": {
+      "format": "date-time",
+      "title": "Failed At",
+      "type": "string"
+    },
+    "payload": {
+      "title": "Payload",
+      "type": "string"
+    }
+  },
+  "required": [
+    "original_topic",
+    "partition",
+    "offset",
+    "consumer_group",
+    "attempts",
+    "error",
+    "failed_at",
+    "payload"
+  ],
+  "title": "DeadLetterV1",
+  "type": "object"
+}

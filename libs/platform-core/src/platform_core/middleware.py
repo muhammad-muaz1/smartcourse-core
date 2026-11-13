@@ -5,6 +5,9 @@ IdempotencyMiddleware (platform_core.idempotency), innermost so its error respon
 still carry the request id and CORS headers. ``install_middleware`` is the one place
 that order is encoded, so no service can get it backwards.
 
+OpenTelemetry's ASGI middleware wraps all of them, so every request — including one
+rejected by idempotency — is a span, and every log line in it carries the trace id.
+
 Rate limiting, body-size limits, security headers and trusted hosts are real needs,
 added when the endpoint that needs them is built, not before — see CLAUDE.md §12.
 """
@@ -21,6 +24,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from platform_core.config import CorsSettings
 from platform_core.idempotency import IdempotencyMiddleware, IdempotencyOptions
 from platform_core.logging import bind_request_id, clear_request_context
+from platform_core.metrics import HTTP_DURATION, HTTP_REQUESTS
+from platform_core.telemetry import instrument_fastapi
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -59,7 +64,12 @@ class RequestContextMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
-            duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            elapsed = time.perf_counter() - start
+            duration_ms = round(elapsed * 1000, 2)
+            method = scope.get("method", "")
+            route = _route_template(scope)
+            HTTP_REQUESTS.labels(method=method, route=route, status=str(status_code)).inc()
+            HTTP_DURATION.labels(method=method, route=route).observe(elapsed)
             await logger.ainfo(
                 "http_request",
                 method=scope.get("method", ""),
@@ -68,6 +78,14 @@ class RequestContextMiddleware:
                 duration_ms=duration_ms,
             )
             clear_request_context()
+
+
+def _route_template(scope: Scope) -> str:
+    """The matched route's template, set on the scope by Starlette's router. Unmatched
+    requests (404s, scanners) share one label rather than one series per path."""
+    route = scope.get("route")
+    path = getattr(route, "path", None)
+    return str(path) if path else "unmatched"
 
 
 def _new_request_id() -> str:
@@ -90,3 +108,6 @@ def install_middleware(
         allow_headers=["*"],
     )
     app.add_middleware(RequestContextMiddleware)
+    # Wraps the whole stack (it patches build_middleware_stack), so the server span
+    # exists before the request id is bound and every log line carries both.
+    instrument_fastapi(app)

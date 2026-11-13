@@ -38,3 +38,6 @@ secrets/
 # Docker volumes mounted locally
 deploy/**/data/
 .temporal/
+
+# Local infra binaries + state (scripts/dev_infra.sh)
+.tools/

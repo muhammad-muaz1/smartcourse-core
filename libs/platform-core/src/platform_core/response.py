@@ -15,6 +15,9 @@ from platform_core.logging import current_request_id
 class Meta(BaseModel):
     request_id: str | None = None
     timestamp: str
+    # Set on reads served from a projection: the point in time the data reflects, so a
+    # client sees the lag instead of assuming real-time (API design §1, "Projection").
+    as_of: str | None = None
 
 
 class Envelope[DataT](BaseModel):
@@ -22,8 +25,12 @@ class Envelope[DataT](BaseModel):
     meta: Meta
 
 
-def success[DataT](data: DataT) -> Envelope[DataT]:
-    meta = Meta(request_id=current_request_id(), timestamp=datetime.now(tz=UTC).isoformat())
+def success[DataT](data: DataT, *, as_of: datetime | None = None) -> Envelope[DataT]:
+    meta = Meta(
+        request_id=current_request_id(),
+        timestamp=datetime.now(tz=UTC).isoformat(),
+        as_of=as_of.isoformat() if as_of is not None else None,
+    )
     return Envelope(data=data, meta=meta)
 
 

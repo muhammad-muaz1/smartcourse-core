@@ -35,6 +35,8 @@ members = [
   "services/identity",
   "services/course",
   "services/learning",
+  "services/notification",
+  "services/analytics",
   "gateway",
 ]
 
@@ -82,3 +84,21 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["asyncpg", "asyncpg.*"]
 ignore_missing_imports = true
+
+# aiokafka ships no type information (no py.typed, no stubs). Only platform_core.kafka
+# imports it; everything else goes through that module's typed wrappers.
+[[tool.mypy.overrides]]
+module = ["aiokafka", "aiokafka.*"]
+ignore_missing_imports = true
+
+# Celery and kombu ship no type information. Only notification's Celery boundary imports
+# them; that boundary is the one place untyped decorators/calls are tolerated, and the
+# service code it calls stays fully typed.
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*", "kombu", "kombu.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["src.celery_app", "src.modules.notifications.tasks"]
+disallow_untyped_decorators = false
+disallow_untyped_calls = false

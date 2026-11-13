@@ -10,7 +10,13 @@ from functools import lru_cache
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from platform_core.config import AppSettings, CorsSettings, HealthSettings, LogSettings
+from platform_core.config import (
+    AppSettings,
+    CorsSettings,
+    HealthSettings,
+    LogSettings,
+    TelemetrySettings,
+)
 
 
 class GatewayAppSettings(AppSettings):
@@ -22,6 +28,8 @@ class UpstreamSettings(BaseModel):
     identity_url: str = "http://localhost:8001"
     course_url: str = "http://localhost:8002"
     learning_url: str = "http://localhost:8003"
+    notification_url: str = "http://localhost:8004"
+    analytics_url: str = "http://localhost:8005"
     timeout_seconds: float = 10.0
     # How long identity's public keys are trusted before being re-fetched. A token
     # with an unknown kid forces an early re-fetch, so a key rotation isn't blocked by
@@ -43,6 +51,7 @@ class Settings(BaseSettings):
     cors: CorsSettings = Field(default_factory=CorsSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
     upstreams: UpstreamSettings = Field(default_factory=UpstreamSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
 
 @lru_cache

@@ -1,4 +1,6 @@
-"""Requires Docker (testcontainers spins up a real Postgres)."""
+"""Requires Docker (testcontainers spins up a real Postgres), or SMARTCOURSE_TEST_POSTGRES_URL.
+Duplicate *delivery* is the consumer runner's inbox (platform_core.kafka); these tests
+cover what the service itself guarantees."""
 
 import uuid
 
@@ -6,10 +8,10 @@ import pytest
 
 from platform_core.exceptions import ForbiddenError
 from src.db import postgres
-from src.modules.enrollments import service
-from src.modules.enrollments.activities import apply_course_event
 from src.modules.enrollments.models import CourseCache, EnrollmentStatus
-from tests.enrollments.helpers import course_event
+from src.modules.enrollments.service import enrollments as service
+from src.modules.enrollments.service import read_models
+from tests.enrollments.helpers import apply_course_event, course_event
 
 
 async def _course(**kwargs: object) -> uuid.UUID:
@@ -26,18 +28,11 @@ async def _cache(course_id: uuid.UUID) -> CourseCache:
 
 
 class TestCourseCache:
-    async def test_a_duplicate_delivery_is_skipped(self, _db: None) -> None:
-        event = course_event(uuid.uuid4(), revision=1)
-        async with postgres.database.session_scope() as session:
-            assert await service.apply_course_event(session, event) is True
-        async with postgres.database.session_scope() as session:
-            assert await service.apply_course_event(session, event) is False
-
     async def test_an_older_revision_never_overwrites_a_newer_one(self, _db: None) -> None:
         course_id = uuid.uuid4()
         await apply_course_event(course_event(course_id, revision=5, status="archived"))
         async with postgres.database.session_scope() as session:
-            applied = await service.apply_course_event(
+            applied = await read_models.apply_course_event(
                 session, course_event(course_id, revision=4, status="published")
             )
         assert applied is False

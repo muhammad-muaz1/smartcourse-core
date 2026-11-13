@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "UserSnapshotV1": {
+      "properties": {
+        "user_id": {
+          "format": "uuid",
+          "title": "User Id",
+          "type": "string"
+        },
+        "email": {
+          "title": "Email",
+          "type": "string"
+        },
+        "full_name": {
+          "title": "Full Name",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "registered_at": {
+          "format": "date-time",
+          "title": "Registered At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id",
+        "email",
+        "full_name",
+        "role",
+        "registered_at"
+      ],
+      "title": "UserSnapshotV1",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "const": "user.registered.v1",
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "user": {
+      "$ref": "#/$defs/UserSnapshotV1"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "user"
+  ],
+  "title": "UserEventV1",
+  "type": "object"
+}

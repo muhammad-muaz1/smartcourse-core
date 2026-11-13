@@ -1,9 +1,9 @@
-"""HTTP layer: validate, call service, return. No business logic here — see service.py.
+"""HTTP layer: validate, call service, return. No business logic here — see service/.
 
-``POST /courses/{id}/enrollments`` is ★ — Idempotency-Key required, enforced by the
-middleware configured in app.py. The gateway routes the enrollment sub-paths of
-``/courses`` and ``/users`` here; everything else under those prefixes belongs to course
-and identity.
+``POST /courses/{id}/enrollments`` and ``POST /enrollments/{id}/lessons/{lid}/complete``
+are ★ — Idempotency-Key required, enforced by the middleware configured in app.py. The
+gateway routes the enrollment sub-paths of ``/courses`` and ``/users`` here; everything
+else under those prefixes belongs to course and identity.
 """
 
 import uuid
@@ -15,9 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.response import CursorPage, Envelope, success
 from src.core.dependencies import CurrentUser, get_current_user, require_roles
 from src.db.postgres import get_session
-from src.modules.enrollments import service
 from src.modules.enrollments.models import EnrollmentStatus
-from src.modules.enrollments.schemas import EnrollmentPublic
+from src.modules.enrollments.schemas import EnrollmentPublic, ProgressPublic
+from src.modules.enrollments.service import enrollments as service
+from src.modules.enrollments.service import progress
 
 router = APIRouter(tags=["enrollments"])
 
@@ -124,3 +125,31 @@ async def enrollment_history_route(
         cursor=cursor,
     )
     return success(page)
+
+
+@router.get("/enrollments/{enrollment_id}/progress", response_model=Envelope[ProgressPublic])
+async def get_progress_route(
+    enrollment_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Envelope[ProgressPublic]:
+    view = await progress.get_progress(
+        session, enrollment_id, current_user_id=current_user.id, role=current_user.role
+    )
+    return success(view)
+
+
+@router.post(
+    "/enrollments/{enrollment_id}/lessons/{lesson_id}/complete",
+    response_model=Envelope[ProgressPublic],
+)
+async def complete_lesson_route(
+    enrollment_id: uuid.UUID,
+    lesson_id: uuid.UUID,
+    current_user: CurrentUser = Depends(_require_student),
+    session: AsyncSession = Depends(get_session),
+) -> Envelope[ProgressPublic]:
+    view = await progress.complete_lesson(
+        session, enrollment_id, lesson_id, current_user_id=current_user.id
+    )
+    return success(view)

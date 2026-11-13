@@ -1,0 +1,115 @@
+{
+  "$defs": {
+    "CourseSnapshotV1": {
+      "properties": {
+        "course_id": {
+          "format": "uuid",
+          "title": "Course Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "instructor_id": {
+          "format": "uuid",
+          "title": "Instructor Id",
+          "type": "string"
+        },
+        "max_enrollments": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Enrollments"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "lesson_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lesson Ids"
+        }
+      },
+      "required": [
+        "course_id",
+        "revision",
+        "title",
+        "status",
+        "instructor_id"
+      ],
+      "title": "CourseSnapshotV1",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "enum": [
+        "course.created.v1",
+        "course.updated.v1",
+        "course.published.v1",
+        "course.unpublished.v1",
+        "course.archived.v1"
+      ],
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "course": {
+      "$ref": "#/$defs/CourseSnapshotV1"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "course"
+  ],
+  "title": "CourseEventV1",
+  "type": "object"
+}

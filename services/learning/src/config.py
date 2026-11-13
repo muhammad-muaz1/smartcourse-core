@@ -20,12 +20,14 @@ from platform_core.config import (
     HealthSettings,
     IdempotencySettings,
     JWTVerifySettings,
+    KafkaSettings,
     LogSettings,
+    MetricsSettings,
+    OutboxSettings,
     PostgresSettings,
     RedisSettings,
-    TemporalSettings,
+    TelemetrySettings,
 )
-from smartcourse_contracts.course_events import LEARNING_TASK_QUEUE
 
 
 class LearningAppSettings(AppSettings):
@@ -38,13 +40,13 @@ class LearningPostgresSettings(PostgresSettings):
 
 
 class LearningRedisSettings(RedisSettings):
-    # DB 3 is learning's. Today: Idempotency-Key responses for enrollment.
+    # DB 3 is learning's. Today: Idempotency-Key responses for enrollment and lesson
+    # completion.
     url: str = "redis://localhost:6379/3"
 
 
-class LearningTemporalSettings(TemporalSettings):
-    # The queue course schedules course-event delivery onto — part of the contract.
-    task_queue: str = LEARNING_TASK_QUEUE
+class LearningMetricsSettings(MetricsSettings):
+    worker_port: int = 9103
 
 
 class Settings(BaseSettings):
@@ -65,8 +67,11 @@ class Settings(BaseSettings):
     idempotency: IdempotencySettings = Field(default_factory=IdempotencySettings)
     # Public key only — this service verifies tokens, it never issues them.
     security: JWTVerifySettings = Field(default_factory=JWTVerifySettings)
-    # Used by the worker process (src/worker.py) only.
-    temporal: LearningTemporalSettings = Field(default_factory=LearningTemporalSettings)
+    # Used by the worker process (src/worker.py) only — the API never talks to Kafka.
+    outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    kafka: KafkaSettings = Field(default_factory=KafkaSettings)
+    metrics: LearningMetricsSettings = Field(default_factory=LearningMetricsSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
 
 @lru_cache

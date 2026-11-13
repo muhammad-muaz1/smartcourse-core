@@ -119,6 +119,11 @@ class TestPublishSaga:
             assert run.status == PublishRunStatus.FAILED
             assert run.failed_step == "validate"
             assert run.error == "course has no modules"
+            # The failure is reported for analytics in the same transaction.
+            assert (await _topics(session))[-2:] == [
+                "smartcourse.course.updated.v1",
+                "smartcourse.workflow.failed.v1",
+            ]
             # failed is editable again, and publishable again
             await add_module(
                 session,

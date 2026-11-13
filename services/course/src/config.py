@@ -11,7 +11,7 @@ misconfigured deployment fails before it accepts traffic.
 
 from functools import lru_cache
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from platform_core.config import (
@@ -20,9 +20,13 @@ from platform_core.config import (
     HealthSettings,
     IdempotencySettings,
     JWTVerifySettings,
+    KafkaSettings,
     LogSettings,
+    MetricsSettings,
+    OutboxSettings,
     PostgresSettings,
     RedisSettings,
+    TelemetrySettings,
     TemporalSettings,
 )
 
@@ -45,9 +49,8 @@ class CourseTemporalSettings(TemporalSettings):
     task_queue: str = "course-tq"
 
 
-class OutboxSettings(BaseModel):
-    poll_interval_seconds: float = 1.0
-    batch_size: int = 100
+class CourseMetricsSettings(MetricsSettings):
+    worker_port: int = 9102
 
 
 class Settings(BaseSettings):
@@ -69,6 +72,9 @@ class Settings(BaseSettings):
     # Used by the worker process (src/worker.py) only — the API never talks to Temporal.
     temporal: CourseTemporalSettings = Field(default_factory=CourseTemporalSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    kafka: KafkaSettings = Field(default_factory=KafkaSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    metrics: CourseMetricsSettings = Field(default_factory=CourseMetricsSettings)
     # Public key only — this service verifies tokens, it never issues them.
     security: JWTVerifySettings = Field(default_factory=JWTVerifySettings)
 

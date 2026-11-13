@@ -26,8 +26,8 @@ from src.modules.users import service as users_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# The only NotificationSender implementation until Celery exists (API_DESIGN.md §3) —
-# stateless, so one shared instance is fine.
+# Password-reset delivery only (see LoggingNotificationSender) — stateless, so one
+# shared instance is fine. The welcome message comes from the notification service.
 _sender = service.LoggingNotificationSender()
 
 
@@ -49,7 +49,6 @@ async def register_route(
         role=body.role,
         client_ip=client_ip,
         settings=settings.security,
-        sender=_sender,
     )
     return success(UserPublic.model_validate(user, from_attributes=True))
 

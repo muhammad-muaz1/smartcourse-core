@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from platform_core.config import PostgresSettings, RedisSettings
+from platform_core.telemetry import instrument_engine
 
 # Alembic's own recommended naming convention — without it, autogenerate produces
 # constraint names that vary by dialect and are unreviewable in a migration diff.
@@ -71,6 +72,9 @@ class PostgresDatabase:
             echo=settings.echo,
             connect_args={"timeout": 5},
         )
+        # One span per statement, under whatever request, consumer or activity span is
+        # current. A no-op until a tracer provider is configured.
+        instrument_engine(self._engine)
         self._session_factory = async_sessionmaker(bind=self._engine, expire_on_commit=False)
 
     async def close(self) -> None:

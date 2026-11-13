@@ -1,26 +1,22 @@
 """``course.*.v1`` — the facts the course service publishes about a course's catalogue
-state, and the delivery seam learning exposes to receive them.
+state.
 
 Event-carried state transfer: every event carries the course's full catalogue snapshot,
 not a diff, so a consumer never needs to call ``course`` back and can apply events in
 any order — ``revision`` increases with every change, and a consumer ignores anything
 not newer than what it already holds.
 
-Until Kafka + Schema Registry arrive (docs/adr/0011), these are Pydantic models carried
-as JSON through a Temporal activity. Compatibility rules are the same as they will be
-for Avro: within ``v1`` only add optional fields; anything else is ``v2``.
+Compatibility (enforced by tests/test_schemas.py against schemas/): within ``v1`` only
+add optional fields; anything else is ``v2``.
 """
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
-# Temporal routing for delivery into learning. The name and queue are the contract —
-# course schedules the activity by name and never imports learning's code.
-LEARNING_TASK_QUEUE = "learning-tq"
-APPLY_COURSE_EVENT_ACTIVITY = "learning.apply_course_event.v1"
+from smartcourse_contracts.topics import topic_for
 
 CourseEventType = Literal[
     "course.created.v1",
@@ -29,6 +25,7 @@ CourseEventType = Literal[
     "course.unpublished.v1",
     "course.archived.v1",
 ]
+COURSE_TOPICS: tuple[str, ...] = tuple(topic_for(t) for t in get_args(CourseEventType))
 
 # Catalogue status as published on the wire. Deliberately a plain string set, not
 # course's internal enum: a consumer must tolerate a status it doesn't know yet.
@@ -44,6 +41,9 @@ class CourseSnapshotV1(BaseModel):
     # None = unlimited seats.
     max_enrollments: int | None = None
     published_at: datetime | None = None
+    # Every lesson in the course, in reading order. What learning measures progress and
+    # completion against. None = sent by a producer that predates the field.
+    lesson_ids: list[uuid.UUID] | None = None
 
 
 class CourseEventV1(BaseModel):

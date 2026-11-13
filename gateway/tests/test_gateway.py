@@ -18,6 +18,8 @@ from src.config import Settings, UpstreamSettings
 IDENTITY = "http://identity.test"
 COURSE = "http://course.test"
 LEARNING = "http://learning.test"
+NOTIFICATION = "http://notification.test"
+ANALYTICS = "http://analytics.test"
 
 
 def _b64url_uint(value: int) -> str:
@@ -68,7 +70,13 @@ def upstreams() -> FakeUpstreams:
 def client(upstreams: FakeUpstreams) -> Iterator[TestClient]:
     settings = Settings(
         _env_file=None,
-        upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE, learning_url=LEARNING),
+        upstreams=UpstreamSettings(
+            identity_url=IDENTITY,
+            course_url=COURSE,
+            learning_url=LEARNING,
+            notification_url=NOTIFICATION,
+            analytics_url=ANALYTICS,
+        ),
     )
     app = create_app(settings, transport=httpx.MockTransport(upstreams))
     with TestClient(app) as test_client:
@@ -98,6 +106,9 @@ def test_course_routes_go_to_course_with_the_query_string(
         ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/enrollments", "learning.test"),
         ("/api/v1/users/3f6c1c1e-0000-4000-8000-000000000000/enrollment-history", "learning.test"),
         ("/api/v1/enrollments/me", "learning.test"),
+        ("/api/v1/enrollments/3f6c1c1e-0000-4000-8000-000000000000/progress", "learning.test"),
+        ("/api/v1/notifications/me", "notification.test"),
+        ("/api/v1/analytics/overview", "analytics.test"),
         ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/modules", "course.test"),
         ("/api/v1/courses/3f6c1c1e-0000-4000-8000-000000000000/publish", "course.test"),
         ("/api/v1/modules/3f6c1c1e-0000-4000-8000-000000000000/lessons", "course.test"),
@@ -211,7 +222,13 @@ def test_health_is_ok_only_when_every_service_is(
 ) -> None:
     healthy = client.get("/health")
     assert healthy.status_code == 200
-    assert set(healthy.json()["services"]) == {"identity", "course", "learning"}
+    assert set(healthy.json()["services"]) == {
+        "identity",
+        "course",
+        "learning",
+        "notification",
+        "analytics",
+    }
 
 
 def test_health_is_503_when_a_service_is_down(upstreams: FakeUpstreams) -> None:
@@ -220,7 +237,13 @@ def test_health_is_503_when_a_service_is_down(upstreams: FakeUpstreams) -> None:
     )
     settings = Settings(
         _env_file=None,
-        upstreams=UpstreamSettings(identity_url=IDENTITY, course_url=COURSE, learning_url=LEARNING),
+        upstreams=UpstreamSettings(
+            identity_url=IDENTITY,
+            course_url=COURSE,
+            learning_url=LEARNING,
+            notification_url=NOTIFICATION,
+            analytics_url=ANALYTICS,
+        ),
     )
     with TestClient(create_app(settings, transport=httpx.MockTransport(upstreams))) as client:
         response = client.get("/health")
