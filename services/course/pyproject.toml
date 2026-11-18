@@ -11,6 +11,8 @@ dependencies = [
   "temporalio[pydantic]>=1.36,<2",
   # Idempotency-Key responses for POST /courses/{id}/publish.
   "redis>=8.1,<9",
+  # S3-compatible asset storage (MinIO / S3). Only used when storage backend="minio".
+  "aioboto3>=13,<16",
   "fastapi>=0.141,<0.142",
   "uvicorn[standard]>=0.53,<0.54",
   "pydantic>=2.13,<3",

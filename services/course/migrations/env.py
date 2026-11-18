@@ -11,6 +11,7 @@ from src.db import outbox  # noqa: F401
 from src.db.base import Base
 
 # Import every module that defines Base-mapped models here so autogenerate can see them.
+from src.modules.assets import models as assets_models  # noqa: F401
 from src.modules.courses import models as courses_models  # noqa: F401
 
 # this is the Alembic Config object, which provides

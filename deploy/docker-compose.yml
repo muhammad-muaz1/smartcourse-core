@@ -96,6 +96,19 @@ services:
       timeout: 5s
       retries: 30
 
+  # S3-compatible object storage for lesson attachments (course service). API :9000,
+  # web console :9001 (minioadmin/minioadmin). The bucket is created by the app on first
+  # upload (MinioStorage._ensure_bucket).
+  minio:
+    image: minio/minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - minio-data:/data
+
   jaeger:
     image: jaegertracing/jaeger:2.23.0
     ports: ["16686:16686", "4317:4317", "4318:4318"]
@@ -161,11 +174,18 @@ services:
       SMARTCOURSE_POSTGRES__DSN: postgresql+asyncpg://postgres:postgres@postgres:5432/course_db
       SMARTCOURSE_REDIS__URL: redis://redis:6379/1
       SMARTCOURSE_SECURITY__JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/jwt_public.pem
+      # Lesson attachments → MinIO (bucket auto-created on first upload).
+      SMARTCOURSE_STORAGE__BACKEND: minio
+      SMARTCOURSE_STORAGE__MINIO_ENDPOINT_URL: http://minio:9000
+      SMARTCOURSE_STORAGE__MINIO_ACCESS_KEY: minioadmin
+      SMARTCOURSE_STORAGE__MINIO_SECRET_KEY: minioadmin
+      SMARTCOURSE_STORAGE__MINIO_BUCKET: smartcourse-assets
     volumes: *public-key
     ports: ["8002:8002"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_started }
 
   # Temporal worker on course-tq (publish saga) + the outbox relay (course.* → Kafka).
   # Same image as the API; the API never talks to Temporal or Kafka.
@@ -299,3 +319,4 @@ volumes:
   postgres-data:
   temporal-data:
   kafka-data:
+  minio-data:

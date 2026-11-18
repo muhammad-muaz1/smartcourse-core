@@ -18,6 +18,7 @@ from src.db import (
     postgres,
 )
 from src.db.base import Base
+from src.modules.assets import models as _assets_models  # noqa: F401 - registers assets table
 from src.modules.courses import models  # noqa: F401 - registers the aggregate's tables
 
 

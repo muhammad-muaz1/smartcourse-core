@@ -6,6 +6,7 @@
 #   scripts/dev_infra.sh kafka        # Kafka (KRaft, single node) on :9092 — needs Java 17+
 #   scripts/dev_infra.sh jaeger       # Jaeger v2: UI :16686, OTLP gRPC :4317 / HTTP :4318
 #   scripts/dev_infra.sh prometheus   # Prometheus on :9090, scraping deploy/observability
+#   scripts/dev_infra.sh minio        # MinIO (S3-compatible) API :9000, console :9001
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -97,9 +98,32 @@ prometheus() {
     --web.listen-address=":9090"
 }
 
+minio() {
+  # Single static binary; MinIO publishes the matching sha256 next to it. The data dir
+  # lives under .tools/ so uploaded assets survive a restart. Root creds default to
+  # minioadmin/minioadmin for local dev — override with MINIO_ROOT_USER / _PASSWORD and
+  # keep them in step with services/course/.env (SMARTCOURSE_STORAGE__MINIO_*).
+  local base="https://dl.min.io/server/minio/release/linux-amd64"
+  local bin="$TOOLS/minio"
+  if [ ! -x "$bin" ]; then
+    local expected
+    # The sha256sum file is "<hash>  minio".
+    expected="$(curl -fsL "$base/minio.sha256sum" | awk '{print $1}')"
+    download "$base/minio" "$bin" "$expected" sha256
+    chmod +x "$bin"
+  fi
+  local data="$TOOLS/minio-data"
+  mkdir -p "$data"
+  export MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
+  export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin}"
+  # The app creates its bucket on first upload (MinioStorage._ensure_bucket), so no mc.
+  exec "$bin" server "$data" --address ":9000" --console-address ":9001"
+}
+
 case "${1:-}" in
   kafka) kafka ;;
   jaeger) jaeger ;;
   prometheus) prometheus ;;
-  *) echo "usage: $0 kafka|jaeger|prometheus" >&2; exit 2 ;;
+  minio) minio ;;
+  *) echo "usage: $0 kafka|jaeger|prometheus|minio" >&2; exit 2 ;;
 esac

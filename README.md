@@ -18,7 +18,7 @@ database, behind a gateway. Clients see a single API at `http://localhost:8000/a
 | --- | --- | --- | --- |
 | `gateway` | **8000** | — | The only address clients use. Routes by path, rejects forged tokens, carries `X-Request-ID` through to the services |
 | `services/identity` | 8001 | `identity_db` | Register, login, refresh (rotating, with reuse detection), logout, `/auth/me`, password reset, JWKS |
-| `services/course` | 8002 | `course_db` | Catalogue, modules and lessons, course lifecycle (draft → publishing → published/failed, unpublish, archive), publish runs |
+| `services/course` | 8002 | `course_db` | Catalogue, modules and lessons, course lifecycle (draft → publishing → published/failed, unpublish, archive), publish runs, lesson attachments (`/assets`) |
 | `services/identity` worker | :9101 metrics | `identity_db` | Outbox relay: `user.registered.v1` → Kafka |
 | `services/course` worker | :9102 metrics | `course_db` | Temporal worker on `course-tq` (publishing saga) + outbox relay (`course.*`, `workflow.failed`) |
 | `services/learning` | 8003 | `learning_db` | Enrol (duplicates, seat limits, published-only), withdraw, progress + lesson completion, roster, history |
@@ -32,6 +32,7 @@ database, behind a gateway. Clients see a single API at `http://localhost:8000/a
 | Temporal dev server | 7233 / UI 8233 | — | Durable workflows: the publishing saga |
 | Jaeger | UI 16686, OTLP 4318 | — | Traces: one trace from the gateway to the last consumer and Celery task |
 | Prometheus | 9090 | — | Scrapes every API's `/metrics` and every worker's metrics port |
+| MinIO | API 9000, console 9001 | — | S3-compatible object storage for lesson attachments (course service; `STORAGE__BACKEND=minio`) |
 
 Shared mechanics (response envelope, error shape, logging, tracing, metrics, middleware,
 idempotency keys, JWT verification, DB sessions, health, outbox, inbox, the Kafka
@@ -78,14 +79,19 @@ make temporal            # in its own terminal: Temporal dev server, UI on :8233
 make kafka               # in its own terminal: Kafka on :9092 (downloaded on first run)
 make jaeger              # in its own terminal: traces, UI on :16686 (optional)
 make prometheus          # in its own terminal: metrics on :9090 (optional)
+make minio               # in its own terminal: object storage for lesson attachments,
+                         #   API :9000, console :9001 (needed when STORAGE__BACKEND=minio)
 make dev                 # gateway + 5 services + 5 workers + Celery; Ctrl+C stops all
 make smoke               # in another terminal: end-to-end check of every event flow
 ```
 
 Without Kafka the APIs still run and every state change is kept in its service's outbox;
 nothing reaches the other services until Kafka is back. Without Temporal, publish runs
-stay `pending`. Kafka, Jaeger and Prometheus run from official release binaries kept in
-`.tools/` (checksum-verified, gitignored).
+stay `pending`. Lesson attachments go to MinIO (S3-compatible) when the course service's
+`SMARTCOURSE_STORAGE__BACKEND=minio` (env.example's default); set it to `local` to store
+files under `services/course/var/` with nothing extra running. Kafka, Jaeger, Prometheus
+and MinIO run from official release binaries kept in `.tools/` (checksum-verified,
+gitignored).
 
 ### Upgrading a machine from week 2
 

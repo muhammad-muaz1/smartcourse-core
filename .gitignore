@@ -41,3 +41,6 @@ deploy/**/data/
 
 # Local infra binaries + state (scripts/dev_infra.sh)
 .tools/
+
+# Local asset storage (LocalFilesystemStorage; backend swaps to S3 in prod)
+services/*/var/

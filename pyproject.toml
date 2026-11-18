@@ -98,6 +98,12 @@ ignore_missing_imports = true
 module = ["celery", "celery.*", "kombu", "kombu.*"]
 ignore_missing_imports = true
 
+# aioboto3 / botocore ship partial or no type information. Only the course service's
+# MinioStorage imports them, lazily, behind the typed Storage protocol.
+[[tool.mypy.overrides]]
+module = ["aioboto3", "aioboto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = ["src.celery_app", "src.modules.notifications.tasks"]
 disallow_untyped_decorators = false

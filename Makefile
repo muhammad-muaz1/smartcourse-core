@@ -1,4 +1,4 @@
-.PHONY: install env keys db migrate setup cutover dev worker celery temporal kafka jaeger prometheus create-admin backfill shell test test-local smoke lint types check up down logs
+.PHONY: install env keys db migrate setup cutover dev worker celery temporal kafka jaeger prometheus minio create-admin backfill shell test test-local smoke lint types check up down logs
 
 # Deployables that own a database, and everything that runs as a process.
 SERVICES := identity course learning notification analytics
@@ -108,6 +108,12 @@ jaeger:
 # prometheus: http://localhost:9090, scraping every API and worker.
 prometheus:
 	scripts/dev_infra.sh prometheus
+
+# minio: S3-compatible object storage for lesson attachments — API http://localhost:9000,
+# console http://localhost:9001 (minioadmin/minioadmin). Needed when the course service's
+# SMARTCOURSE_STORAGE__BACKEND=minio; the bucket is created on first upload.
+minio:
+	scripts/dev_infra.sh minio
 
 # The only way to get an admin account — self-registration can't grant that role.
 # Prompts for the password interactively; see services/identity/scripts/create_admin.py.

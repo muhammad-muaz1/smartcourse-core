@@ -10,8 +10,9 @@ misconfigured deployment fails before it accepts traffic.
 """
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from platform_core.config import (
@@ -53,6 +54,32 @@ class CourseMetricsSettings(MetricsSettings):
     worker_port: int = 9102
 
 
+class AssetStorageSettings(BaseModel):
+    """Where lesson attachments are stored. ``minio`` is S3-compatible object storage
+    (self-hosted via ``make minio``, or any S3 endpoint); ``local`` writes files under
+    ``local_dir`` and needs no running service — the default so tests and a bare checkout
+    work without MinIO. See ``modules/assets/storage.py``. Overridable per env, e.g.
+    ``SMARTCOURSE_STORAGE__BACKEND=minio``, ``SMARTCOURSE_STORAGE__MINIO_ENDPOINT_URL=...``.
+    """
+
+    backend: Literal["local", "minio"] = "local"
+    # Hard ceiling per upload. Matches the frontend dropzone's 50 MB attachment cap.
+    max_bytes: int = 50 * 1024 * 1024
+
+    # backend="local": relative to the service's working directory (services/course).
+    local_dir: str = "var/course-assets"
+
+    # backend="minio": local dev defaults match `make minio` (minioadmin/minioadmin on
+    # :9000). Override every one of these in a real deployment — the secret key in
+    # particular must come from the environment, never a committed value.
+    minio_endpoint_url: str = "http://localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "smartcourse-assets"
+    minio_region: str = "us-east-1"
+    minio_secure: bool = False
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SMARTCOURSE_",
@@ -75,6 +102,7 @@ class Settings(BaseSettings):
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     metrics: CourseMetricsSettings = Field(default_factory=CourseMetricsSettings)
+    storage: AssetStorageSettings = Field(default_factory=AssetStorageSettings)
     # Public key only — this service verifies tokens, it never issues them.
     security: JWTVerifySettings = Field(default_factory=JWTVerifySettings)
 

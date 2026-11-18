@@ -13,20 +13,46 @@ publishing saga.
 **Database:** `course_db` (PostgreSQL). No other service reads it.
 **Task queue:** `course-tq` (Temporal) — `PublishCourseWorkflow`.
 **Redis DB index:** `1` — `Idempotency-Key` responses for publish; the catalogue cache later.
+**Object storage:** lesson attachments — MinIO / S3-compatible (`make minio`), or local
+files for dev. See **Asset storage** below.
 **Port (local):** `8002`
 **Processes:** the API (`python -m src.main`) and the worker (`python -m src.worker`:
-Temporal worker + outbox relay). The API never talks to Temporal or Kafka.
+Temporal worker + outbox relay). The API never talks to Temporal or Kafka. The API is the
+only process that talks to object storage.
 
 ## Modules
 
 | Module | Responsibility |
 | --- | --- |
 | `courses` | the whole course aggregate: catalogue, metadata, status lifecycle, modules, lessons, publish runs and the publish saga |
+| `assets`  | uploaded file metadata (lesson attachments) + the storage backend; bytes live in object storage, not the database |
 
-One module on purpose: every write checks the course's ownership and status under its row
-lock, and splitting modules/lessons/publishing out would mean modules importing each
-other's models. Inside it, `service/` and `routes/` are split by concern (courses,
-structure, publishing).
+`courses` is one module on purpose: every write checks the course's ownership and status
+under its row lock, and splitting modules/lessons/publishing out would mean modules
+importing each other's models. Inside it, `service/` and `routes/` are split by concern
+(courses, structure, publishing). `assets` is separate because it's a distinct concern
+(binary storage) and touches courses/lessons only by id, through `courses`' service
+helpers — it never imports the aggregate's write internals.
+
+## Asset storage
+
+Lesson attachments (PDF/DOC/PPT/XLS/TXT/MD/CSV/ZIP, ≤50 MB) upload to object storage; the
+`assets` table holds only metadata (`storage_key`, size, sha256, owner), and is the
+access-control anchor — a download is authorised against the asset's course, exactly like
+a lesson (published → anyone; otherwise owner/admin only).
+
+- `modules/assets/storage.py` is the seam: a `Storage` protocol (`put`/`get`/`delete`) with
+  two backends — `MinioStorage` (aioboto3, S3-compatible: MinIO locally, any S3 endpoint in
+  prod) and `LocalFilesystemStorage` (the default, so tests and a bare checkout need nothing
+  running). Switching is one config value (`SMARTCOURSE_STORAGE__BACKEND`).
+- Upload is a **raw-body** POST (`/assets?course_id=&filename=&lesson_id=`), not multipart,
+  so the body streams straight to storage. It's gated by the same editable+ownership rules
+  as any content write; the course row is locked first.
+- Deleting a row schedules the byte-delete as a response background task — i.e. after the
+  transaction commits — so a rollback never strands a row without its file. A failed/partial
+  upload cleans up its bytes inline.
+- Large videos stay URL-only (the 50 MB cap and the gateway's whole-body buffering rule
+  them out of this path); the real fix is a presigned PUT straight to the bucket.
 
 ## Status lifecycle
 
