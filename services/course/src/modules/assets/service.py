@@ -40,9 +40,21 @@ logger = structlog.get_logger(__name__)
 
 # Mirrors the frontend dropzone's allow-list (lesson-form.tsx). The server is the real
 # gate: the extension decides the stored suffix and bounds the content type.
-ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
-    {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".md", ".csv", ".zip"}
-)
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset({
+    # Documents
+    ".pdf", ".doc", ".docx", ".dot", ".dotx", ".odt", ".rtf", ".txt", ".md",
+    ".pages", ".epub", ".json", ".xml", ".log",
+    # Spreadsheets
+    ".xls", ".xlsx", ".ods", ".csv", ".tsv", ".numbers",
+    # Presentations
+    ".ppt", ".pptx", ".pps", ".ppsx", ".odp", ".key",
+    # Images
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg", ".bmp", ".ico",
+    ".tif", ".tiff", ".heic", ".heif",
+    # Archives
+    ".zip",
+})
+
 
 
 class AssetNotFoundError(NotFoundError):
